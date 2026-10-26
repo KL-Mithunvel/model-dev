@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets — never committed (see CLAUDE-COMMON.md → Secrets & Credentials)
+.env
+!.env.example
+
+# Data — never committed; small derived records (manifests, metrics) may be
+data/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

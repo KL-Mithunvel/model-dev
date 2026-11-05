@@ -1,5 +1,17 @@
 # Claude Log
 
+## 2026-11-06 — Scoping a local Roboflow-style app; no code written
+- Owner first asked to clone `github.com/morluto/rea` (MIT, TypeScript MCP server for AI-driven reverse engineering; needs Node 22+/24+/26+ and an installed Ghidra/IDA/Hopper/Kuna for native targets). Inspected it read-only via its GitHub page; nothing was cloned.
+- Owner then redirected: build a local, offline, privacy-first alternative to Roboflow (projects, dataset import, annotation, AI-assisted labeling, model training, live CPU/GPU/hardware monitoring, workload sharing). Planned as a multi-stage, multi-agent, small-versions effort.
+- Decisions so far:
+  - App form: local web app (FastAPI backend, thin vanilla-JS frontend), per `PROJ_STARTER.md`.
+  - rea's role: learn Roboflow's feature set and document how to implement similar functionality. Clean-room only — no copying Roboflow code or assets. Assistant advised staying on observable behaviour and public docs, and checking Roboflow's terms of service.
+  - rea is to be integrated only where relevant (a tool, not merged into app code) — exact placement still open.
+- Open questions sent to owner (answers pending): where the project lives (this repo is the template library, and its Branch Policy keeps `main` generic — a separate repo is recommended), annotation approach (build vs CVAT vs Label Studio; comparison given), training stack and licensing (Ultralytics is AGPL), AI-assist method, hardware sensors, workload-sharing model, multi-agent roles, release cadence.
+- Environment note from the earlier survey: RTX 1000 Ada, 6 GB VRAM — the design must assume a small GPU.
+- Noted: `machine-vision` is not listed by `git branch -a` although the log says it was pushed; probably needs `git fetch`. Not investigated.
+- Files changed: this log, `TODO.md`, `README.md` (was empty).
+
 ## 2026-09-28 — Record the never-merge branch policy
 - Owner clarified that `main` and `machine-vision` are separate personal copies and are never to be merged. Added a "Branch Policy" section (marked repo-specific, not to be copied into new projects) at the top of `.CLAUDE/CLAUDE.md` on `main`, and matching notices on `machine-vision`.
 - Cancelled the TODO item to merge `main` into `machine-vision`; recorded the reason there. The earlier merge of `origin/main` into `main` is unaffected — that was the same branch on the remote.

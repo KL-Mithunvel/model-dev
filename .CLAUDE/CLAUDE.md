@@ -14,13 +14,14 @@ This repo holds **two independent copies** of the template, kept as separate bra
 
 | Branch | Content |
 |--------|---------|
-| `main` | The generic template (this branch) |
+| `main` | The template library **and, since 2026-11-06, the Local Vision Studio app** (owner decision: no separate repo) |
 | `machine-vision` | The same template plus the machine-vision baseline — four gates, docs, tools, Roboflow skills |
 
 - **Never merge, rebase, or open a PR between `main` and `machine-vision`, in either direction.** They are meant to diverge. `machine-vision` is a personal copy, not a feature branch.
 - **Do not treat `machine-vision` as unmerged work.** Do not suggest merging it, syncing it, or resolving differences between the two branches.
 - **To share an improvement, copy the text by hand** into the other branch's files, as its own commit on that branch, and only after asking the owner.
 - **Check `git branch --show-current` before editing.** Changes belong to the branch you are on.
+- **App on `main` (owner decision, 2026-11-06):** the app code (`studio/`, `tests/`, `config.yaml`) and its docs (`docs/`) live on `main` beside the template files. The generic template files under `.CLAUDE/` stay generic: when copying them to another project, leave out the app-specific sections (Project Overview, Preflight Gates, Development Rules, Project-Specific Overrides below).
 
 ---
 
@@ -51,19 +52,25 @@ New entries follow the same naming convention: `<short-project-id>.md`.
 
 ---
 
-## Project Overview  [TO BE FILLED]
+## Project Overview
 
-> What the project is, who built it, the core problem it solves. Author, license, entry point, minimum runtime versions.
+**Local Vision Studio** (working title) — a local, offline, privacy-first alternative to a hosted computer-vision platform: import images, create projects, annotate (with AI assistance), train models, and monitor CPU/GPU hardware live. Author: kl mithunvel. Open-source app; user datasets are never committed. Licence: to be chosen in Stage 9 (core permissive; optional Ultralytics YOLO plugin kept separate because it is AGPL).
 
-_Not yet filled — update before the first session._
+- **Full plan, decisions, stages, gates and risks:** `docs/PLAN.md` (read first).
+- **UX rules (Apple HIG principles, tokens, checklist):** `docs/UX.md`.
+- **Third-party REA tool and the clean-room rule:** `docs/REA.md`.
+- **Status:** planning complete in outline; no application code yet (Stage 0 in progress).
+- **Stack:** Python (FastAPI, SQLite, PyTorch) backend; thin vanilla-JS frontend; YAML config. Entry point (planned): `python -m studio`. Runtime: Python 3.13 (fallback 3.12 if CUDA torch wheels require it — see Gate G2).
 
 ---
 
-## Preflight Gates  [if applicable — TO BE FILLED]
+## Preflight Gates
 
-> Numbered gates that must be cleared, in order, before any code is written or changed. Each gate: what must be done, what must be recorded to clear it (and where), and a one-line "why this exists". See `CLAUDE-COMMON.md` → Preflight Gates for the rules and three example gates (understand the existing state, survey the environment, confirm where it will run). Delete this section if the project has no gates.
+No application code is written until these are cleared and recorded in `.CLAUDE/CLAUDE-LOG.md`. Details are in `docs/PLAN.md` §4.
 
-_Not yet filled — update before the first session._
+1. **G1 Understand existing state** — clean-room feature notes (`docs/FEATURES.md`) and format summaries (`docs/FORMATS.md`) from allowed sources only. *Why: building against a guessed spec wastes stages.*
+2. **G2 Survey environment** — `tools/compute_survey.py` recorded (done 2026-11-06); CUDA torch verified. *Why: a CPU-only torch wheel silently ignores the GPU.*
+3. **G3 Confirm where it runs** — owner confirms worker machines (OS, GPU, network) and needed export targets. *Why: export formats and worker design depend on them.*
 
 ---
 
@@ -139,19 +146,28 @@ _None recorded yet._
 
 ---
 
-## Development Rules  [TO BE FILLED]
+## Development Rules
 
-> Binding architectural rules, each numbered and sourced. Referenced by number in TODO items and commit messages.
+Referenced by number in TODO items and commit messages.
 
-_Not yet filled — update before the first session._
+1. **Local-first privacy.** Dataset images and labels never leave the machine. The only outbound network use is weight downloads and owner-paired workers. No telemetry. *(Owner decision 2026-11-06)*
+2. **Neutral storage.** Annotations are stored so they export losslessly to COCO and YOLO; CVAT and Label Studio via adapters. No lock-in.
+3. **No dataset in git.** `data/` is gitignored; only small manifests/metrics may be committed.
+4. **Licence boundary.** The core never imports Ultralytics YOLO (AGPL). It lives in a separate optional plugin. Record each model-weight licence before adding it.
+5. **Clean-room.** Study the reference platform only via public docs, API reference, open-source repos and the owner's own account behaviour. Copy no code or assets. Do not point REA at proprietary hosted clients (`docs/REA.md`).
+6. **UX is binding.** No screen ships without passing the checklist in `docs/UX.md`. (UX-1)
+7. **Hardware is read at runtime.** Never hard-code GPU, VRAM or core counts; every tunable lives in `config.yaml`.
+8. **Every hardware sampler and ML backend has a fake** that runs on any machine, so tests do not need a GPU.
+9. **Small tagged versions.** A version is tagged only with passing tests and docs updated in the same commit. Commit at each good step.
+10. **Multi-agent process is undecided.** Do not spawn roles/worktrees until the owner and Claude agree on it (planned discussion before Stage 1).
 
 ---
 
-## Project TODO List  [TO BE FILLED]
+## Project TODO List
 
 Legend: 🔴 Bug / rule violation  |  🟡 Incomplete feature  |  🟢 Not started  |  ✅ Done
 
-_Not yet filled._
+The live task list is `TODO.md`; the stage plan is `docs/PLAN.md`. Sections above still marked `[TO BE FILLED]` (Running, Architecture, Key Modules, Schema, Conventions, Data Files, Platform, Deployment) are filled as each stage lands code — in the same commit as that code.
 
 ---
 

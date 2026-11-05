@@ -31,6 +31,8 @@ Master index of all documents in this `.CLAUDE/` library. Every new project-base
 
 | Path | Role | Read when |
 |------|------|-----------|
+| [../docs/PLAN.md](../docs/PLAN.md) | Local Vision Studio plan: decisions, architecture, gates, stages and versions, risks | Start of every session on the app |
+| [../docs/UX.md](../docs/UX.md) | UX rules from Apple HIG principles: tokens, accessibility, shortcuts, per-screen checklist | Before building or reviewing any screen |
 | [../docs/REA.md](../docs/REA.md) | How the third-party REA tool is cloned, pinned, reviewed and allowed to be used (clean-room rule) | Before using or installing REA |
 
 ## Skills

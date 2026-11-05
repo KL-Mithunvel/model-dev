@@ -16,6 +16,8 @@
 - Owner answered all 13 scoping questions (see `docs/PLAN.md` once written): app lives on `main`; just the owner; detection + classification + segmentation + keypoints, images only; build our own annotator with COCO/YOLO neutral formats and CVAT/Label Studio adapters; ML-backend protocol with SAM, zero-shot and active-learning backends; permissive models plus optional Ultralytics YOLO plugin; ONNX/TFLite/TensorRT/PyTorch export; hardware monitor incl. Intel Arc/NPU; remote training workers; Apple HIG principles for UX; multi-agent process deferred to the start of coding.
 - Cloned `morluto/rea` (shallow, `ad518cf`, v6.8.0) into `tools/rea/`, added it to `.gitignore`, reviewed DISCLAIMER, SECURITY and `install.sh`. Did not run `npm install` or `rea setup`: Node here is v24.16.0 and REA needs ≥ 24.22.1.
 - REA's DISCLAIMER excludes tampering with online services and copying proprietary code/assets, so it will not be pointed at Roboflow's hosted client; the clean-room scope stays public docs, open-source repos and own-account behaviour. Recorded in the new `docs/REA.md`.
+- Wrote `docs/UX.md` (1f23679) and `docs/PLAN.md` (3c1a6a3); updated `.CLAUDE/CLAUDE.md` (Branch Policy now allows the app on `main`; Project Overview, Preflight Gates and Development Rules filled). Remaining template sections stay `[TO BE FILLED]` until code lands.
+- Owner message ".+3" arrived mid-session and was unintelligible; asked for a resend. Not acted on.
 - Compute survey, full laptop: Dell Precision 3591, Core Ultra 7 155H (16C/22T), 31.5 GB RAM, RTX 1000 Ada 6 GB, Intel Arc iGPU, 410 GB free disk, Python 3.13.7, torch not installed.
 
 ## 2026-09-28 — Record the never-merge branch policy

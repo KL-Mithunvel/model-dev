@@ -1,7 +1,14 @@
 # TODO
 
 ## In Progress
-- [ ] Scope the local Roboflow-style app: collect owner's answers to the open questions (location, annotation approach, training stack, AI-assist, hardware monitor, workload sharing, agent roles, release cadence), then write the multi-stage plan.
+- [ ] Stage 0 (v0.0) of `docs/PLAN.md`: reference notes (G1), environment + CUDA torch (G2), worker/export confirmation (G3).
+
+## Done (this project)
+- [x] Scoping questions answered by owner (2026-11-06) — decisions recorded in `docs/PLAN.md` §1.
+- [x] Multi-stage plan written — `docs/PLAN.md` (3c1a6a3).
+- [x] UX guide based on Apple HIG principles — `docs/UX.md` (1f23679).
+- [x] REA cloned (gitignored), reviewed, documented — `docs/REA.md` (ad6dc12).
+- [x] `.CLAUDE/CLAUDE.md` updated: app lives on `main`, project overview, gates, development rules.
 
 ## Done
 - [x] Create the `machine-vision` branch holding the claude_MV baseline (four gates, docs, tools, Roboflow skills) — pushed to origin (924a9c1 on `machine-vision`).
@@ -12,12 +19,18 @@
 - [x] ~~Merge `main` into `machine-vision`~~ — CANCELLED. The owner keeps the two branches as separate personal copies and never merges them. Added a "Branch Policy" section to `.CLAUDE/CLAUDE.md` so future AI sessions know.
 
 ## Not Started
-- [ ] Write the multi-stage / multi-phase / multi-agent plan for the local Roboflow-style app in full (goal, steps, files, success criteria per phase) before any code, with small tagged versions.
-- [ ] Decide where the app lives (recommended: new sibling repo, since `main` here must stay a generic template) and create it from this template.
+- [x] ~~Write the multi-stage plan~~ — DONE: `docs/PLAN.md` (3c1a6a3). Multi-agent part deferred (see below).
+- [x] ~~Decide where the app lives~~ — DECIDED: on `main`, no new repo; Branch Policy updated.
+- [ ] Discuss and agree the multi-agent process (roles, worktrees, merge rules) in detail before Stage 1 code.
+- [ ] G1: write `docs/FEATURES.md` (clean-room notes on the reference platform) and `docs/FORMATS.md` (COCO/YOLO/CVAT/Label Studio).
+- [ ] G2: create venv, `requirements.txt`, `config.yaml`, `.env.example`, pytest skeleton; install CUDA torch and verify the GPU on Python 3.13 (else 3.12).
+- [ ] G3: owner to confirm worker machines (OS, GPU, network) and needed export targets.
+- [ ] Owner to read Roboflow's Terms of Service before further study.
+- [ ] Choose project name, accent colour/density, and final licence.
 - [ ] Owner: upgrade Node to ≥ 24.22.1, then install REA and run `rea setup` (see `docs/REA.md`); currently blocked on Node v24.16.0.
 - [ ] Choose a first allowed REA target (open-source or owned software; not Roboflow's hosted client).
-- [ ] Clean-room study of Roboflow's feature set (public docs, API reference, observable behaviour) documented under `docs/`; owner to confirm Roboflow's terms allow the planned use.
-- [ ] Run `tools/compute_survey.py` for the new project and record the result (preflight gate); last known: RTX 1000 Ada, 6 GB VRAM.
+- [x] ~~Clean-room study ... documented under `docs/`~~ — superseded by the G1 item above (`docs/FEATURES.md`).
+- [x] ~~Run `tools/compute_survey.py`~~ — DONE 2026-11-06 (RTX 1000 Ada 6 GB, 31.5 GB RAM, 22 threads); recorded in the log.
 - [ ] Investigate why `machine-vision` is not listed by `git branch -a` (likely needs `git fetch`).
 - [ ] Pin dependencies that silently break: record the pin, the reason, and a verification command (machine-vision Development Rule 7).
 - [ ] Record failed experiments and attempts with their numbers (machine-vision Development Rule 8).

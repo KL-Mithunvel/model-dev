@@ -12,6 +12,12 @@
 - Noted: `machine-vision` is not listed by `git branch -a` although the log says it was pushed; probably needs `git fetch`. Not investigated.
 - Files changed: this log, `TODO.md`, `README.md` (was empty).
 
+## 2026-11-06 (2) — REA set up as a gitignored tool; plan work begins
+- Owner answered all 13 scoping questions (see `docs/PLAN.md` once written): app lives on `main`; just the owner; detection + classification + segmentation + keypoints, images only; build our own annotator with COCO/YOLO neutral formats and CVAT/Label Studio adapters; ML-backend protocol with SAM, zero-shot and active-learning backends; permissive models plus optional Ultralytics YOLO plugin; ONNX/TFLite/TensorRT/PyTorch export; hardware monitor incl. Intel Arc/NPU; remote training workers; Apple HIG principles for UX; multi-agent process deferred to the start of coding.
+- Cloned `morluto/rea` (shallow, `ad518cf`, v6.8.0) into `tools/rea/`, added it to `.gitignore`, reviewed DISCLAIMER, SECURITY and `install.sh`. Did not run `npm install` or `rea setup`: Node here is v24.16.0 and REA needs ≥ 24.22.1.
+- REA's DISCLAIMER excludes tampering with online services and copying proprietary code/assets, so it will not be pointed at Roboflow's hosted client; the clean-room scope stays public docs, open-source repos and own-account behaviour. Recorded in the new `docs/REA.md`.
+- Compute survey, full laptop: Dell Precision 3591, Core Ultra 7 155H (16C/22T), 31.5 GB RAM, RTX 1000 Ada 6 GB, Intel Arc iGPU, 410 GB free disk, Python 3.13.7, torch not installed.
+
 ## 2026-09-28 — Record the never-merge branch policy
 - Owner clarified that `main` and `machine-vision` are separate personal copies and are never to be merged. Added a "Branch Policy" section (marked repo-specific, not to be copied into new projects) at the top of `.CLAUDE/CLAUDE.md` on `main`, and matching notices on `machine-vision`.
 - Cancelled the TODO item to merge `main` into `machine-vision`; recorded the reason there. The earlier merge of `origin/main` into `main` is unaffected — that was the same branch on the remote.

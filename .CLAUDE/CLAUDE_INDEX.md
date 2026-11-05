@@ -27,6 +27,12 @@ Master index of all documents in this `.CLAUDE/` library. Every new project-base
 | [../tools/compute_survey.py](../tools/compute_survey.py) | Compute survey (CPU, RAM, disk, GPU) — used by the "Survey the environment" preflight gate | Before compute-heavy development in any project |
 | [../.gitignore](../.gitignore) | Baseline ignore list — venvs, `.env`, `data/`, IDE and OS files | Copying into a new project |
 
+## Project Docs
+
+| Path | Role | Read when |
+|------|------|-----------|
+| [../docs/REA.md](../docs/REA.md) | How the third-party REA tool is cloned, pinned, reviewed and allowed to be used (clean-room rule) | Before using or installing REA |
+
 ## Skills
 
 | Path | Role |

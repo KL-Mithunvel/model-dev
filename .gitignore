@@ -11,6 +11,9 @@ venv/
 # Data — never committed; small derived records (manifests, metrics) may be
 data/
 
+# Third-party tool clones — re-create per docs/REA.md, never committed
+tools/rea/
+
 # IDE / OS
 .idea/
 .vscode/

@@ -14,7 +14,8 @@
 ## Not Started
 - [ ] Write the multi-stage / multi-phase / multi-agent plan for the local Roboflow-style app in full (goal, steps, files, success criteria per phase) before any code, with small tagged versions.
 - [ ] Decide where the app lives (recommended: new sibling repo, since `main` here must stay a generic template) and create it from this template.
-- [ ] Decide how `morluto/rea` is brought in (installed tool, vendored under `tools/rea/`, or separate clone); not yet cloned.
+- [ ] Owner: upgrade Node to ≥ 24.22.1, then install REA and run `rea setup` (see `docs/REA.md`); currently blocked on Node v24.16.0.
+- [ ] Choose a first allowed REA target (open-source or owned software; not Roboflow's hosted client).
 - [ ] Clean-room study of Roboflow's feature set (public docs, API reference, observable behaviour) documented under `docs/`; owner to confirm Roboflow's terms allow the planned use.
 - [ ] Run `tools/compute_survey.py` for the new project and record the result (preflight gate); last known: RTX 1000 Ada, 6 GB VRAM.
 - [ ] Investigate why `machine-vision` is not listed by `git branch -a` (likely needs `git fetch`).

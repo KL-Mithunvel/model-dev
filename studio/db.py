@@ -30,7 +30,9 @@ def connect(path: Path | str) -> sqlite3.Connection:
     """
     if str(path) != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=30)
+    # check_same_thread=False: the web framework may use a request's connection from a different
+    # worker thread than the one that opened it. A connection is never shared between requests.
+    conn = sqlite3.connect(str(path), timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     if str(path) != ":memory:":

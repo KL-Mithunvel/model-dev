@@ -4,7 +4,15 @@
 app:
   host: 127.0.0.1          # local only by default (Development Rule 1)
   port: 8000
+  allowed_hosts: [127.0.0.1, localhost]   # Host-header allowlist (DNS-rebinding guard)
   data_dir: data           # gitignored; per-project folders are created below it
+
+projects:
+  max_name_length: 80
+
+tags:
+  max_length: 40
+  max_per_image: 20
 
 images:                    # limits mirror common practice; provisional
   max_file_mb: 30

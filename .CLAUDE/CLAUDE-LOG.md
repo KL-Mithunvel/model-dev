@@ -36,7 +36,8 @@
   - Verification detail worth remembering: my first browser re-check ran against an OLD server still bound to port 8765 (my earlier kill hit a PID-0 entry), so the new server failed to start (exit 3) and several "failures" were just old backend code. Lesson: confirm the new process actually bound the port, and kill test servers by PID found via the command line.
   - Also: a harness bug (synthetic Enter needs `text="\r"`) produced 2 false failures; a real one (focus stealing on first load) was found by the same run.
   - New dev tool `tools/ui_smoke.py` (starts its own server + data, drives headless Edge/Chrome, 15 checks, all passing). Tests: 84 passed, 1 skipped (symlinks need a Windows privilege).
-  - Not yet done: owner approval of the `v0.1` tag; a second reviewer pass on the fixes was not run.
+  - Owner approved the tag; `v0.1` created on `39f055f` (annotated, local, not pushed). A second reviewer pass on the fixes was not run.
+  - Drafted the Stage 2 (annotation) plan for owner approval; nothing built yet.
 - Owner message ".+3" arrived mid-session and was unintelligible; asked for a resend. Not acted on.
 - Compute survey, full laptop: Dell Precision 3591, Core Ultra 7 155H (16C/22T), 31.5 GB RAM, RTX 1000 Ada 6 GB, Intel Arc iGPU, 410 GB free disk, Python 3.13.7, torch not installed.
 

@@ -206,3 +206,4 @@ details ul { margin: var(--sp-2) 0 0; padding-left: var(--sp-5); font-size: var(
 .dlg-foot.flush { padding: 0; }
 .grow-field { flex: 1; min-width: 90px; }
 a.btn, a.nav-item, a.skip { text-decoration: none; }
+.route-host { height: 100%; min-height: 0; }

@@ -62,7 +62,8 @@ export function plural(count, one, many = `${one}s`) {
 // ---- toasts ------------------------------------------------------------------------------------
 export function toast(message, { error = false, actionLabel = null, onAction = null } = {}) {
   const host = document.getElementById("toasts");
-  const node = el("div", { class: `toast${error ? " error" : ""}` }, el("span", { text: message }));
+  // Errors use role="alert" so screen readers announce them immediately.
+  const node = el("div", { class: `toast${error ? " error" : ""}`, role: error ? "alert" : false }, el("span", { text: message }));
   if (actionLabel && onAction) {
     node.append(
       el("button", {
@@ -83,8 +84,11 @@ export function toast(message, { error = false, actionLabel = null, onAction = n
 
 // ---- dialogs -----------------------------------------------------------------------------------
 // openDialog builds a <dialog>, which gives a focus trap, Esc-to-close and a backdrop for free.
+let dialogCount = 0;
+
 export function openDialog({ title, body, actions = [], className = "", onClose = null }) {
-  const dialog = el("dialog", { class: className, "aria-labelledby": "dlg-title" });
+  const titleId = `dlg-title-${++dialogCount}`; // ids must be unique if dialogs ever overlap
+  const dialog = el("dialog", { class: className, "aria-labelledby": titleId });
   const foot = el("div", { class: "dlg-foot" });
   const close = (result) => {
     dialog.dataset.result = result ?? "";
@@ -101,7 +105,7 @@ export function openDialog({ title, body, actions = [], className = "", onClose 
     );
   }
   dialog.append(
-    el("div", { class: "dlg-head", id: "dlg-title", text: title }),
+    el("div", { class: "dlg-head", id: titleId, text: title }),
     el("div", { class: "dlg-body" }, body),
     ...(actions.length ? [foot] : []), // append(null) would print the word "null"
   );

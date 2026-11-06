@@ -1,7 +1,8 @@
 # TODO
 
 ## In Progress
-- [ ] Stage 0 (v0.0) of `docs/PLAN.md`: reference notes (G1), environment + CUDA torch (G2), worker/export confirmation (G3).
+- [ ] Stage 1 (v0.1): built, reviewed and fixed; waiting for the owner's tag approval (see Not Started → v0.1 items).
+- [x] Stage 0 (v0.0) tagged; G3 (worker machines/export priority) still deferred by the owner.
 
 ## Done (this project)
 - [x] Scoping questions answered by owner (2026-11-06) — decisions recorded in `docs/PLAN.md` §1.
@@ -24,8 +25,9 @@
 - [x] Multi-agent process agreed and written — `docs/AGENTS.md` (2026-11-06).
 - [x] Stage 1 (v0.1) plan approved by owner (copy images; folder path import; no datasets table).
 - [x] v0.1 built in five commits (aa7024f, b09f5fc, 0c3e2ad, 074deeb, 0add954) — storage, importer, API, UI, speed-up.
-- [ ] v0.1: independent reviewer pass (docs/AGENTS.md §2 step 4), fix findings, then ask the owner to approve the `v0.1` tag.
-- [ ] v0.1 follow-ups (technical debt in CLAUDE.md): import cancel, parallel import, browser tests, `httpx2` for the test client.
+- [x] v0.1 independent reviewer pass done (verdict FAIL: 1 blocker + 10 should-fix); findings fixed in c46ca4f (backend) and the following frontend commit; verified by 84 tests + 15 browser checks.
+- [ ] v0.1: owner approval of the `v0.1` tag (not tagged yet). Optional: a second reviewer pass on the fixes first.
+- [ ] v0.1 follow-ups (technical debt in CLAUDE.md): parallel import, move browser checks into a real test runner, `httpx2` for the test client (install was blocked), orphan-file sweeper.
 - [x] G1: wrote `docs/FEATURES.md` and `docs/FORMATS.md` (2026-11-06). Cleared for planning.
 - [ ] Before Stage 3: verify every `[U]` (unverified) line in `docs/FORMATS.md` (COCO spec, CVAT XML, Label Studio polygon/keypoint, licences) and add golden sample files under `tests/data/formats/`.
 - [x] G2: venv, pinned `requirements.txt`, `config.yaml`, `.env.example`, `pyproject.toml`, pytest + ruff, `studio/config.py`; CUDA torch 2.14.1+cu130 verified on Python 3.13.7 (GPU matmul OK). 6 tests pass, lint clean (2026-11-06).

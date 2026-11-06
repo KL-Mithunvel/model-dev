@@ -32,7 +32,11 @@
   - `0add954` importer speed: 60.9 s → 55.8 s for 2,000 images (read once; JPEG draft decode). Profiling showed ~10 ms/file is Windows file-open cost, so parallel I/O would be the next gain.
   - Blocked: installing `httpx2` (Starlette's recommended TestClient backend) was denied by the auto-mode classifier; not retried or worked around. Tests use `httpx` and emit one deprecation warning.
   - Docs: `.CLAUDE/CLAUDE.md` Architecture, Key Modules, Schema, Conventions, Data Files, Platform, Technical Debt now filled; `docs/PLAN.md` records measurements and deviations.
-  - Not yet done: independent reviewer pass and owner approval of the `v0.1` tag.
+  - Independent reviewer (fresh-context subagent, read-only) returned **FAIL**: 1 blocker + 10 should-fix + test gaps. I verified the blocker myself by reading the code before acting (the report is data, not authority). Fixed: skip link (also stopped stealing focus on first load), zip member errors, per-file error isolation, batch accounting, symlink/junction reporting, delete-during-import (409), project-id reuse leftovers, SQLite variable limit (chunked), router race, focus loss on load-more/split, Space/keyup, stale tag filter, import cancel + double-start guard, config tunables, unused `python-multipart` removed. Commits: `c46ca4f` (backend) and the frontend commit that follows.
+  - Verification detail worth remembering: my first browser re-check ran against an OLD server still bound to port 8765 (my earlier kill hit a PID-0 entry), so the new server failed to start (exit 3) and several "failures" were just old backend code. Lesson: confirm the new process actually bound the port, and kill test servers by PID found via the command line.
+  - Also: a harness bug (synthetic Enter needs `text="\r"`) produced 2 false failures; a real one (focus stealing on first load) was found by the same run.
+  - New dev tool `tools/ui_smoke.py` (starts its own server + data, drives headless Edge/Chrome, 15 checks, all passing). Tests: 84 passed, 1 skipped (symlinks need a Windows privilege).
+  - Not yet done: owner approval of the `v0.1` tag; a second reviewer pass on the fixes was not run.
 - Owner message ".+3" arrived mid-session and was unintelligible; asked for a resend. Not acted on.
 - Compute survey, full laptop: Dell Precision 3591, Core Ultra 7 155H (16C/22T), 31.5 GB RAM, RTX 1000 Ada 6 GB, Intel Arc iGPU, 410 GB free disk, Python 3.13.7, torch not installed.
 

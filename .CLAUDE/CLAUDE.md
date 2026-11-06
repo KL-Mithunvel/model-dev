@@ -91,6 +91,7 @@ python -m py_compile studio\*.py
 python -m ruff check .
 python -m pytest -q                 # GPU-marked tests skip themselves when no CUDA GPU is present
 python tools\compute_survey.py      # CPU / RAM / disk / GPU survey
+python tools\ui_smoke.py            # browser checks (needs Edge or Chrome; starts its own server)
 ```
 
 ```powershell
@@ -118,7 +119,7 @@ Status: **v0.1** (data core + app shell). Later stages: `docs/PLAN.md`.
 | `studio/jobs.py` | One-worker in-process job runner with progress snapshots |
 | `studio/api/app.py` | FastAPI app factory `create_app`; serves `studio/web/` |
 | `studio/__main__.py` | `python -m studio` launcher |
-| `studio/web/` | Vanilla-JS UI: `css/tokens.css` (design tokens), `css/app.css`, `js/{main,ui,api,palette}.js`, `js/views/{projects,gallery}.js` |
+| `studio/web/` | Vanilla-JS UI: `css/tokens.css` (design tokens), `css/app.css`, `js/{main,ui,api,palette,limits}.js`, `js/views/{projects,gallery}.js` |
 
 ```
 Browser (studio/web) --HTTP/WebSocket--> FastAPI (api/app.py) --> repo.py --> SQLite (data/studio.sqlite)
@@ -137,7 +138,8 @@ Browser (studio/web) --HTTP/WebSocket--> FastAPI (api/app.py) --> repo.py --> SQ
 - **`splits.assign_splits(ids, ratios, seed) -> {id: split}`** — pure; largest-remainder counts; `validate_ratios` raises `ValueError`.
 - **`repo.*`** — `create_project` (raises `ProjectExists`), `delete_project` (rows + files), `list_images(..., split, tag, batch_id, query)` → `(items, total)`, `set_tags`, `set_split`, `apply_splits` → `(counts, previous)` (the `previous` map powers Undo in the UI), `list_batches`. Functions commit before returning.
 - **`api.app.create_app(config=None, allowed_hosts=None)`** — routes are listed in `/docs` when running. Errors are `{"detail": "<readable message>"}`.
-- **`jobs.JobManager`** — `submit(fn, kind) -> job_id`, `get(job_id)`; a failing job never kills the worker.
+- **`jobs.JobManager(keep_finished)`** — `submit(fn, kind, project_id=None) -> job_id` where `fn(progress, cancelled)`; `get`, `cancel(job_id)`, `has_active(project_id)`; a failing job never kills the worker; finished jobs are pruned. `POST /api/jobs/{id}/cancel` asks an import to stop before its next file; what was imported is kept and the report has `cancelled: true`. A project cannot be deleted while it has an active import (409).
+- **Import robustness** — a bad zip member (clash, duplicate name, too long, encrypted) is reported and skipped; a per-file exception is counted as `corrupt` and the import continues; a database error aborts but the batch row keeps the counts so far; symlinks/junctions are not followed and are reported as ignored. `GET /api/limits` exposes name/tag/page limits so the UI never hard-codes them.
 - **Frontend rule:** all text is inserted via `textContent`/`el()` (never `innerHTML`) because file names come from disk. Never pass `null` to `append`/`replaceChildren` (it prints "null").
 
 ---
@@ -197,13 +199,17 @@ _Not yet filled — update before the first session._
 
 ## Known Technical Debt
 
-- **Imports cannot be cancelled** (`studio/jobs.py`, `web/js/views/gallery.js`). `docs/UX.md` §1.3 asks for a cancel button on tasks over 10 s. The dialog can be hidden; the import keeps running. Fix with cooperative cancellation in `importer._run` (check a flag per file).
 - **Import speed is I/O-bound**: ~36 images/s on 1024×768 JPEGs (2,000 in 55.8 s, measured 2026-11-06, synthetic fresh files). One file at a time. Parallel read/decode (threads) is the next lever if datasets grow beyond a few thousand.
 - **Startup migration runs once at `create_app`**, not per process start of workers; fine for one process, revisit with Stage 8 workers.
 - **Splits are not stratified** (no labels yet); revisit in Stage 2/3.
 - **Test client deprecation warning**: Starlette prefers `httpx2` for `TestClient`; the install was blocked in-session, so tests use `httpx` 0.28.1 and show one warning.
 - **Auto-split on a filtered view** always acts on the whole project, not the visible subset.
-- **No browser test suite**: UI behaviour was verified by a one-off DevTools-protocol script (`docs/` does not keep it). Add Playwright-style tests before Stage 2.
+- **Browser checks are a dev tool, not in `pytest`**: `tools/ui_smoke.py` (15 checks: skip link, focus after load-more/split, Space, tag filter, router race, import cancel/delete guard) needs Edge or Chrome and is run by hand before a tag. Extend it with every UI bug fixed; consider a real test runner before Stage 2.
+- **Zip import extracts everything to disk first** (up to `importing.max_zip_uncompressed_gb`), then imports; large zips need that much temporary space.
+- **Orphan files are possible** if the process dies between writing an image's files and committing its row. They are named by hash, so a re-import overwrites them; there is no sweeper yet.
+- **A 16384×16384 image** is within `images.max_side_px` but over Pillow's decompression-bomb limit, so it is reported as "oversize" with Pillow's message.
+- **Symlink handling is only tested on junctions here**: this account cannot create symlinks (Windows privilege), so that test skips; the code path is shared with junctions.
+- **Ids can be reused** after deleting the newest project (`INTEGER PRIMARY KEY` without `AUTOINCREMENT`). Mitigated: creating a project removes any leftover folder for its id. A stale browser tab on a deleted project may show a newer one with the same id.
 
 ---
 

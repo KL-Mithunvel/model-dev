@@ -25,6 +25,7 @@ Master index of all documents in this `.CLAUDE/` library. Every new project-base
 | Path | Role | Read when |
 |------|------|-----------|
 | [../tools/compute_survey.py](../tools/compute_survey.py) | Compute survey (CPU, RAM, disk, GPU) — used by the "Survey the environment" preflight gate | Before compute-heavy development in any project |
+| [../tools/ui_smoke.py](../tools/ui_smoke.py) | Browser smoke test: starts its own server, drives headless Edge/Chrome, 15 UI checks | Before tagging any version that changes the UI; add a check per UI bug fixed |
 | [../.gitignore](../.gitignore) | Baseline ignore list — venvs, `.env`, `data/`, IDE and OS files | Copying into a new project |
 
 ## Project Docs

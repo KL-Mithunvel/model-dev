@@ -1,5 +1,6 @@
 // Projects list: create, open, delete.
 import { api } from "../api.js";
+import { limits } from "../limits.js";
 import { confirmDialog, el, formatDate, icon, openDialog, plural, toast } from "../ui.js";
 
 function splitSummary(counts) {
@@ -17,7 +18,7 @@ export function newProjectDialog(onCreated) {
     class: "input",
     id: "project-name",
     type: "text",
-    maxlength: "80",
+    maxlength: String(limits.project_name_max),
     autocomplete: "off",
     placeholder: "e.g. Warehouse pallets",
   });
@@ -109,8 +110,9 @@ export async function mount(container, { setToolbar, navigate }) {
         });
         if (!ok) return;
         try {
-          await api(`/api/projects/${project.id}`, { method: "DELETE" });
-          toast(`Deleted “${project.name}”`);
+          const result = await api(`/api/projects/${project.id}`, { method: "DELETE" });
+          if (result?.warning) toast(result.warning, { error: true });
+          else toast(`Deleted “${project.name}”`);
           load();
         } catch (error) {
           toast(error.message, { error: true });

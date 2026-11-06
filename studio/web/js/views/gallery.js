@@ -1,5 +1,6 @@
 // Project gallery: thumbnails, filters, selection, inspector (split + tags), import, auto-split.
 import { api, watchJob } from "../api.js";
+import { limits } from "../limits.js";
 import { el, formatBytes, formatDate, icon, isTyping, openDialog, plural, toast } from "../ui.js";
 
 const SPLITS = ["train", "val", "test"];
@@ -17,7 +18,7 @@ export async function mount(container, { setToolbar, projectId }) {
     tags: [],
     loading: false,
     token: 0,
-    pageSize: 60,
+    pageSize: limits.page_size,
   };
 
   const layout = el("div", { class: "gallery no-inspector" });
@@ -55,6 +56,7 @@ export async function mount(container, { setToolbar, projectId }) {
       grid.replaceChildren(el("div", { class: "state-box", text: "Loading images…" }));
     }
     renderMore();
+    const firstNew = state.items.length;
     try {
       const page = await api(query(state.items.length));
       if (token !== state.token) return; // a newer request superseded this one
@@ -64,13 +66,26 @@ export async function mount(container, { setToolbar, projectId }) {
     } catch (error) {
       if (token !== state.token) return;
       state.loading = false;
+      if (!reset) {
+        renderMore();
+        toast(error.message, { error: true });
+        return;
+      }
       grid.replaceChildren(
         el("div", { class: "state-box", role: "alert" }, el("p", { text: error.message }), el("button", { class: "btn", type: "button", text: "Try again", onclick: () => loadPage(true) })),
       );
       return;
     }
     state.loading = false;
-    renderAll();
+    if (reset) {
+      renderAll();
+    } else {
+      // Append only the new tiles: rebuilding the grid would destroy the focused tile and
+      // throw keyboard users back to the top of the page.
+      grid.append(...state.items.slice(firstNew).map((item, offset) => renderTile(item, firstNew + offset)));
+      renderMore();
+      updateSummary();
+    }
   }
 
   // ---- rendering -------------------------------------------------------------------------
@@ -184,7 +199,7 @@ export async function mount(container, { setToolbar, projectId }) {
     }
     for (const item of items) item.split = split;
     await refreshProjectCounts();
-    refreshTiles();
+    refreshTiles({ keepInspector: true });
     toast(split ? `Set ${plural(ids.length, "image")} to ${SPLIT_LABEL[split]}` : `Cleared the split on ${plural(ids.length, "image")}`, {
       actionLabel: "Undo",
       onAction: () => restoreSplits(before),
@@ -208,14 +223,27 @@ export async function mount(container, { setToolbar, projectId }) {
     state.project = await api(`/api/projects/${projectId}`);
   }
 
-  function refreshTiles() {
+  // Re-render tiles in place. Keeps keyboard focus on the same tile; with keepInspector the
+  // inspector is not rebuilt (that would drop focus from the button that was just pressed).
+  function refreshTiles({ keepInspector = false } = {}) {
+    const focusedIndex = document.activeElement?.closest?.(".tile")?.dataset.index;
     for (const tile of grid.querySelectorAll(".tile")) {
       const item = state.items[Number(tile.dataset.index)];
       if (!item) continue;
-      const fresh = renderTile(item, Number(tile.dataset.index));
-      tile.replaceWith(fresh);
+      tile.replaceWith(renderTile(item, Number(tile.dataset.index)));
     }
-    renderInspector();
+    if (focusedIndex !== undefined) {
+      grid.querySelector(`.tile[data-index="${focusedIndex}"]`)?.focus();
+    }
+    if (keepInspector) syncSplitButtons();
+    else renderInspector();
+  }
+
+  function syncSplitButtons() {
+    const current = new Set(selectedItems().map((i) => i.split || ""));
+    for (const button of inspector.querySelectorAll(".seg button")) {
+      button.setAttribute("aria-pressed", String(current.size === 1 && current.has(button.dataset.value)));
+    }
   }
 
   function splitControl(items) {
@@ -223,7 +251,7 @@ export async function mount(container, { setToolbar, projectId }) {
     const group = el("div", { class: "seg", role: "group", "aria-label": "Split" });
     for (const [value, label] of [["train", "Train"], ["val", "Val"], ["test", "Test"], ["", "None"]]) {
       group.append(
-        el("button", { type: "button", text: label, "aria-pressed": String(current.size === 1 && current.has(value)), onclick: () => applySplit(items, value || null) }),
+        el("button", { type: "button", text: label, "data-value": value, "aria-pressed": String(current.size === 1 && current.has(value)), onclick: () => applySplit(items, value || null) }),
       );
     }
     return group;
@@ -231,13 +259,21 @@ export async function mount(container, { setToolbar, projectId }) {
 
   function tagEditor(item) {
     const box = el("div", { class: "tag-box" });
-    const input = el("input", { type: "text", "aria-label": "Add a tag", placeholder: item.tags.length ? "" : "Add a tag…", maxlength: "40", list: "tag-suggestions" });
+    const input = el("input", { type: "text", "aria-label": "Add a tag", placeholder: item.tags.length ? "" : "Add a tag…", maxlength: String(limits.tag_max_length), list: "tag-suggestions" });
     const suggestions = el("datalist", { id: "tag-suggestions" }, ...state.tags.map((t) => el("option", { value: t.tag })));
     const save = async (tags) => {
       try {
         const result = await api(`/api/images/${item.id}/tags`, { method: "PUT", body: { tags } });
         item.tags = result.tags;
         state.tags = await api(`/api/projects/${projectId}/tags`);
+        if (state.filters.tag && !state.tags.some((t) => t.tag === state.filters.tag)) {
+          // The tag being filtered on no longer exists anywhere: drop the filter, don't leave a
+          // dropdown that says "All tags" while the grid is still filtered.
+          state.filters.tag = "";
+          renderFilters();
+          await loadPage(true);
+          return;
+        }
         refreshTiles();
         renderFilters();
         document.querySelector(".inspector .tag-box input")?.focus();
@@ -338,8 +374,14 @@ export async function mount(container, { setToolbar, projectId }) {
   grid.addEventListener("click", (event) => {
     const tile = event.target.closest(".tile");
     if (!tile) return;
+    for (const other of grid.querySelectorAll('.tile[tabindex="0"]')) other.setAttribute("tabindex", "-1");
+    tile.setAttribute("tabindex", "0"); // exactly one tile is in the tab order
     state.focusIndex = Number(tile.dataset.index);
     select(state.focusIndex, event);
+  });
+  // A <button> fires click on Space keyup in some browsers; we already handled Space on keydown.
+  grid.addEventListener("keyup", (event) => {
+    if (event.key === " " && event.target.closest(".tile")) event.preventDefault();
   });
   grid.addEventListener("keydown", (event) => {
     const tile = event.target.closest(".tile");
@@ -391,7 +433,10 @@ export async function mount(container, { setToolbar, projectId }) {
     const pathInput = el("input", { class: "input", id: "import-path", type: "text", autocomplete: "off", placeholder: String.raw`C:\Users\me\Pictures\photos   or   D:\data\photos.zip` });
     const problem = el("p", { class: "error-text", role: "alert" });
     let handle;
+    let starting = false; // a double click or Enter+click must not start two imports
     const start = async () => {
+      if (starting) return;
+      starting = true;
       problem.textContent = "";
       let job;
       try {
@@ -399,6 +444,7 @@ export async function mount(container, { setToolbar, projectId }) {
       } catch (error) {
         problem.textContent = error.message;
         pathInput.focus();
+        starting = false;
         return;
       }
       showProgress(job.job_id);
@@ -418,15 +464,29 @@ export async function mount(container, { setToolbar, projectId }) {
       const bar = el("div", { class: "progress", role: "progressbar", "aria-label": "Import progress", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": "0" }, el("div"));
       const status = el("p", { class: "num", role: "status", text: "Starting…" });
       const hide = el("button", { class: "btn", type: "button", text: "Hide", onclick: () => handle.close("hidden") });
+      const cancel = el("button", {
+        class: "btn btn-danger", type: "button", text: "Cancel import",
+        onclick: async () => {
+          cancel.disabled = true;
+          status.textContent = "Cancelling… images already imported are kept.";
+          try {
+            await api(`/api/jobs/${jobId}/cancel`, { method: "POST" });
+          } catch (error) {
+            cancel.disabled = false;
+            toast(error.message, { error: true });
+          }
+        },
+      });
       body.replaceChildren(
         status, bar,
-        el("p", { class: "hint", text: "You can hide this window; the import keeps running. It cannot be cancelled yet." }),
-        el("div", { class: "dlg-foot flush" }, hide),
+        el("p", { class: "hint", text: "You can hide this window; the import keeps running. Cancelling keeps the images already imported." }),
+        el("div", { class: "dlg-foot flush" }, cancel, hide),
       );
       watchJob(jobId, (job) => {
         const pct = job.total ? Math.round((job.done / job.total) * 100) : 0;
         bar.firstChild.style.width = `${pct}%`;
         bar.setAttribute("aria-valuenow", String(pct));
+        if (job.cancel_requested) return; // keep the "Cancelling…" message
         status.textContent = job.state === "queued" ? "Waiting to start…" : `${job.done.toLocaleString()} of ${job.total.toLocaleString()} files checked`;
       }).then(async (job) => {
         await loadProject();
@@ -438,7 +498,9 @@ export async function mount(container, { setToolbar, projectId }) {
           return;
         }
         const r = job.report;
-        toast(`Imported ${plural(r.added, "image")}${r.duplicates ? `, skipped ${plural(r.duplicates, "duplicate")}` : ""}`);
+        toast(r.cancelled
+          ? `Import cancelled. ${plural(r.added, "image")} kept.`
+          : `Imported ${plural(r.added, "image")}${r.duplicates ? `, skipped ${plural(r.duplicates, "duplicate")}` : ""}`);
         if (handle.dialog.isConnected) showSummary(r);
       });
     }
@@ -446,6 +508,7 @@ export async function mount(container, { setToolbar, projectId }) {
     function showSummary(r) {
       const stat = (n, label) => el("div", { class: "stat" }, el("b", { text: n.toLocaleString() }), el("span", { text: label }));
       body.replaceChildren(
+        ...(r.cancelled ? [el("p", { role: "status", text: `Import cancelled. The ${plural(r.added, "image")} imported before you cancelled were kept.` })] : []),
         el("div", { class: "stats" }, stat(r.added, "Added"), stat(r.duplicates, "Duplicates skipped"), stat(r.corrupt, "Unreadable"), stat(r.oversize, "Too large"), stat(r.unsupported, "Other files ignored")),
         ...(r.problems.length
           ? [el("details", {}, el("summary", { text: `Show ${plural(r.problems.length + r.problems_dropped, "problem")}` }),
@@ -463,7 +526,7 @@ export async function mount(container, { setToolbar, projectId }) {
     const inputs = {};
     const fields = el("div", { class: "row" });
     for (const [name, value] of [["train", 80], ["val", 10], ["test", 10]]) {
-      inputs[name] = el("input", { class: "input", id: `r-${name}`, type: "number", min: "0", max: "100", step: "1", value: String(value), inputmode: "numeric" });
+      inputs[name] = el("input", { class: "input", id: `r-${name}`, type: "number", min: "0", max: "100", step: "any", value: String(value), inputmode: "decimal" });
       fields.append(el("div", { class: "field grow-field" }, el("label", { for: `r-${name}`, text: `${SPLIT_LABEL[name]} %` }), inputs[name]));
     }
     const only = el("input", { type: "checkbox", id: "only-unassigned", checked: true });
@@ -471,13 +534,14 @@ export async function mount(container, { setToolbar, projectId }) {
     const total = el("p", { class: "num", role: "status" });
     const problem = el("p", { class: "error-text", role: "alert" });
     const sum = () => SPLITS.reduce((acc, name) => acc + Number(inputs[name].value || 0), 0);
-    const update = () => { total.textContent = `Total: ${sum()}%`; total.className = sum() === 100 ? "num muted" : "num error-text"; };
+    const isHundred = () => Math.abs(sum() - 100) < 0.001; // decimals like 33.3 + 33.3 + 33.4 are fine
+    const update = () => { total.textContent = `Total: ${Math.round(sum() * 100) / 100}%`; total.className = isHundred() ? "num muted" : "num error-text"; };
     for (const input of Object.values(inputs)) input.addEventListener("input", update);
     update();
     let handle;
     const apply = async () => {
       problem.textContent = "";
-      if (sum() !== 100) { problem.textContent = "The three percentages must add up to 100."; return; }
+      if (!isHundred()) { problem.textContent = "The three percentages must add up to 100."; return; }
       try {
         const result = await api(`/api/projects/${projectId}/split/auto`, {
           method: "POST",
@@ -520,6 +584,10 @@ export async function mount(container, { setToolbar, projectId }) {
   }
 
   // ---- start -----------------------------------------------------------------------------
+  const cleanup = () => {
+    document.removeEventListener("keydown", onKey);
+    observer.disconnect();
+  };
   try {
     await loadProject();
   } catch (error) {
@@ -527,7 +595,7 @@ export async function mount(container, { setToolbar, projectId }) {
       el("div", { class: "empty", role: "alert" }, el("h3", { text: error.status === 404 ? "Project not found" : "Could not open this project" }), el("p", { text: error.message }), el("a", { class: "btn btn-primary", href: "#/projects", text: "Back to Projects" })),
     );
     setToolbar({ title: "Project" });
-    return () => {};
+    return cleanup; // the listeners above were already registered; remove them on leaving
   }
   setToolbar({
     title: state.project.name,
@@ -545,8 +613,5 @@ export async function mount(container, { setToolbar, projectId }) {
   });
   renderFilters();
   await loadPage(true);
-  return () => {
-    document.removeEventListener("keydown", onKey);
-    observer.disconnect();
-  };
+  return cleanup;
 }

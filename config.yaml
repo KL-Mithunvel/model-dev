@@ -12,6 +12,21 @@ images:                    # limits mirror common practice; provisional
   allowed_extensions: [".jpg", ".jpeg", ".png", ".webp", ".bmp"]
   thumbnail_px: 256
 
+database:
+  filename: studio.sqlite  # created inside app.data_dir
+
+importing:                 # provisional limits
+  max_zip_uncompressed_gb: 20   # refuse zips that would expand beyond this (zip-bomb guard)
+  progress_every: 10            # report progress after this many files
+
+gallery:
+  default_page_size: 60
+  max_page_size: 200
+
+splits:
+  default_ratios: {train: 0.8, val: 0.1, test: 0.1}
+  default_seed: 42
+
 hardware:
   device: auto             # auto | cuda | cpu — resolved at runtime, never assumed
   monitor_interval_s: 1.0  # provisional sampling period

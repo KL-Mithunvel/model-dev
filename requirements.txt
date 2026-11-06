@@ -11,6 +11,14 @@ torchvision==0.29.1+cu130
 numpy==2.5.4
 pillow==13.0.0
 
+# Web app (v0.1). Licences checked 2026-11-06: fastapi MIT, uvicorn BSD-3, websockets BSD-3,
+# python-multipart Apache-2.0, httpx BSD-3 (httpx is for tests only).
+fastapi==0.162.0
+uvicorn==0.54.0
+websockets==17.4
+python-multipart==0.0.33
+httpx==0.28.1
+
 # Configuration
 PyYAML==6.0.3
 

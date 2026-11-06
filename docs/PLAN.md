@@ -77,6 +77,13 @@ Goal: create a project, import images, see them in a gallery.
 - **1.5 Gallery and splits** — Thumbnail grid with keyboard selection, filters, train/val/test split tool.
   Success: import 2,000 images in under a minute on this machine; gallery scrolls smoothly; duplicates skipped and reported; all UX checklist items pass.
 
+  **Built 2026-11-06 (awaiting review and tag).** Measured: 2,000 synthetic 1024×768 JPEGs imported in 55.8 s (36 img/s; re-import of the same set, all duplicates, 2.5 s). 60 tests pass; ruff clean; contrast ratios checked for both themes (all ≥ 4.5:1 text, ≥ 3:1 UI). Behaviour verified in headless Edge through a DevTools script (selection, keyboard navigation, split + undo, import with duplicates/corrupt/ignored files, palette, shortcut sheet, light/dark, narrow layout).
+  **Deviations from the plan above (owner approved the design choices of copy-not-reference and folder path, not these):**
+  - No separate "datasets" table: a project holds images directly; immutable versions arrive in Stage 3.
+  - Gallery filters are split, tag, name search (and batch via API) instead of "duplicate": duplicates are never stored, they are counted on the batch report.
+  - Split assignment is random, not stratified (no labels yet).
+  - Imports cannot be cancelled yet (can be hidden) — recorded as technical debt against UX §1.3.
+
 ### Stage 2 — Annotation (v0.2–v0.4)
 Goal: a fast, forgiving annotator.
 - **2.1 Boxes + classification (v0.2)** — Canvas with zoom/pan, box draw/resize/move, class list with hotkeys (1–9), image-level labels, unlimited undo/redo, autosave, filmstrip, progress ("412 / 2000 labelled").

@@ -24,6 +24,15 @@
 - G3 (worker machines and export targets) is still open; it does not block this skeleton but blocks Stage 6–8 design.
 - Owner asked to tag `v0.0` while G3 was unanswered: tagged anyway, with G3 recorded as deferred by the owner (PLAN.md Stage 0.4, TODO). Then opened the multi-agent process discussion.
 - Multi-agent discussion (5 questions) resolved: builder + independent reviewer by default, crew only with written contracts; auto-merge after QA, owner approves every tag; role cards + contracts in `docs/`; owner approves each stage plan, agents autonomous inside it. Wrote `docs/AGENTS.md`; updated Rule 10 and added a Project-Specific Override in `.CLAUDE/CLAUDE.md` (generic `PROJ_STARTER.md` left untouched), `docs/PLAN.md`, index and TODO.
+- Stage 1 / v0.1 built (owner approved the plan; recommendations: copy images, folder-path import):
+  - 1.1 `aa7024f` storage: schema, migrations (a test caught a real bug — a failing migration left earlier statements applied; fixed with explicit ROLLBACK), path helper.
+  - 1.2 `b09f5fc` importer (SHA-256 dedupe, Pillow validation, EXIF, thumbnails, zip-slip and zip-bomb guards) + splits.
+  - 1.3 `0c3e2ad` API (FastAPI; background import job + WebSocket; Host allowlist; immutable hash-versioned image URLs). Used lifespan instead of deprecated `on_event`.
+  - 1.4–1.5 `074deeb` UI. Driving headless Edge via DevTools found two real bugs unit tests could not: the word "null" appearing in the filter bar and dialogs (`append(null)` stringifies), and underlined link-buttons; also a missing favicon. Contrast check found one failing pair (dark-mode accent text on the nav tint, 4.32:1) → added `--accent-text`.
+  - `0add954` importer speed: 60.9 s → 55.8 s for 2,000 images (read once; JPEG draft decode). Profiling showed ~10 ms/file is Windows file-open cost, so parallel I/O would be the next gain.
+  - Blocked: installing `httpx2` (Starlette's recommended TestClient backend) was denied by the auto-mode classifier; not retried or worked around. Tests use `httpx` and emit one deprecation warning.
+  - Docs: `.CLAUDE/CLAUDE.md` Architecture, Key Modules, Schema, Conventions, Data Files, Platform, Technical Debt now filled; `docs/PLAN.md` records measurements and deviations.
+  - Not yet done: independent reviewer pass and owner approval of the `v0.1` tag.
 - Owner message ".+3" arrived mid-session and was unintelligible; asked for a resend. Not acted on.
 - Compute survey, full laptop: Dell Precision 3591, Core Ultra 7 155H (16C/22T), 31.5 GB RAM, RTX 1000 Ada 6 GB, Intel Arc iGPU, 410 GB free disk, Python 3.13.7, torch not installed.
 

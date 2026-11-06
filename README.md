@@ -19,6 +19,18 @@ A personal library of `CLAUDE.md` project briefs and workflow rules for AI-assis
 
 `main` is the generic template. `machine-vision` is an independent personal copy with a machine-vision baseline. They are never merged — see the Branch Policy in `.CLAUDE/CLAUDE.md`.
 
+## Running the app
+
+```powershell
+python -m venv venv
+venv\Scripts\python.exe -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu130
+venv\Scripts\activate
+python -m studio          # then open http://127.0.0.1:8000
+python -m pytest -q
+```
+
+Details, architecture and conventions: `.CLAUDE/CLAUDE.md`. Plan: `docs/PLAN.md`.
+
 ## Current direction
 
 Planning a local, offline, privacy-first alternative to Roboflow (dataset import, annotation with AI assistance, model training, live hardware monitoring) as a separate project. See `TODO.md` and `.CLAUDE/CLAUDE-LOG.md` for status.

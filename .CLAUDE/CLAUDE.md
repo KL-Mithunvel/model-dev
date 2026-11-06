@@ -93,55 +93,97 @@ python -m pytest -q                 # GPU-marked tests skip themselves when no C
 python tools\compute_survey.py      # CPU / RAM / disk / GPU survey
 ```
 
-The app server (`python -m studio`) does not exist yet — it arrives in Stage 1.
+```powershell
+python -m studio                    # http://127.0.0.1:8000 (host/port from config.yaml)
+python -m studio --config other.yaml
+```
+
+Keep the server bound to `127.0.0.1`: it reads the folders you name in the import dialog, and its Host-header allowlist (`app.allowed_hosts`) is the DNS-rebinding guard.
 
 ---
 
-## Architecture  [TO BE FILLED]
+## Architecture
 
-> Module responsibilities table (file → role). Data flow diagram (ASCII). Threading or async model. Simulation vs real mode and how to switch.
+Status: **v0.1** (data core + app shell). Later stages: `docs/PLAN.md`.
 
-_Not yet filled — update before the first session._
+| Path | Role |
+|------|------|
+| `studio/config.py` | Load `config.yaml` (`load_config`, `ConfigError`) |
+| `studio/paths.py` | The only place data paths are built (`data_dir`, `db_path`, `project_dir`, `images_dir`, `thumbs_dir`) |
+| `studio/db.py` | SQLite connect + forward-only migrations (`connect`, `migrate`, `utc_now`) |
+| `studio/migrations/NNN_*.sql` | Schema, applied in order; version in `PRAGMA user_version` |
+| `studio/repo.py` | All SQL: projects, images, tags, splits, batches |
+| `studio/importer.py` | Folder/zip import: hash, validate, EXIF, thumbnail, report |
+| `studio/splits.py` | Pure train/val/test assignment (deterministic) |
+| `studio/jobs.py` | One-worker in-process job runner with progress snapshots |
+| `studio/api/app.py` | FastAPI app factory `create_app`; serves `studio/web/` |
+| `studio/__main__.py` | `python -m studio` launcher |
+| `studio/web/` | Vanilla-JS UI: `css/tokens.css` (design tokens), `css/app.css`, `js/{main,ui,api,palette}.js`, `js/views/{projects,gallery}.js` |
 
----
+```
+Browser (studio/web) --HTTP/WebSocket--> FastAPI (api/app.py) --> repo.py --> SQLite (data/studio.sqlite)
+                                              |                      ^
+                                              +--> jobs.py (1 worker thread) --> importer.py --> data/projects/<id>/{images,thumbs}
+```
 
-## Key Modules  [TO BE FILLED]
-
-> One subsection per file or logical group. Public interface: function names, parameters, return types, exceptions raised. Side effects and I/O.
-
-_Not yet filled — update before the first session._
-
----
-
-## Schema Reference  [if applicable — TO BE FILLED]
-
-> Path to DDL/schema file, read-only vs writable, tooling for inspection, annotated schema doc. Delete this section if the project has no data layer.
-
-_Not yet filled — update before the first session._
-
----
-
-## Key Conventions  [if applicable — TO BE FILLED]
-
-> Universal row keys, encoded fields with full encode AND decode formulas, sentinel values, current-record pattern, per-tenant partitioning, env vars. Delete if no non-obvious encoding exists.
-
-_Not yet filled — update before the first session._
+- **Concurrency:** request handlers are sync functions on FastAPI's thread pool, each with its own SQLite connection (`check_same_thread=False`, never shared). Imports run on the single job thread with their own connection, so writes from jobs never overlap. Job progress is in memory; durable results are in `batches`.
+- **No simulation mode yet:** nothing in v0.1 touches hardware. Hardware samplers and ML backends will each ship with a fake (Development Rule 8).
 
 ---
 
-## Data Files  [TO BE FILLED]
+## Key Modules
 
-> What is stored, where, and whether it is git-tracked. Runtime-generated vs committed files. Files that must never be committed.
-
-_Not yet filled — update before the first session._
+- **`importer.import_source(conn, config, project_id, source, progress=None) -> ImportReport`** — `source` is a folder or `.zip`. Raises `ImportFailed` (unknown project, missing/odd source, bad/oversized zip). Writes `data/projects/<id>/images/<sha256><ext>` (original bytes) and `thumbs/<sha256>.jpg`; inserts `images` rows; records a `batches` row. Zip members with path traversal or symlinks are skipped and reported. Outcomes per file are mutually exclusive: added / duplicate / corrupt / oversize / unsupported.
+- **`splits.assign_splits(ids, ratios, seed) -> {id: split}`** — pure; largest-remainder counts; `validate_ratios` raises `ValueError`.
+- **`repo.*`** — `create_project` (raises `ProjectExists`), `delete_project` (rows + files), `list_images(..., split, tag, batch_id, query)` → `(items, total)`, `set_tags`, `set_split`, `apply_splits` → `(counts, previous)` (the `previous` map powers Undo in the UI), `list_batches`. Functions commit before returning.
+- **`api.app.create_app(config=None, allowed_hosts=None)`** — routes are listed in `/docs` when running. Errors are `{"detail": "<readable message>"}`.
+- **`jobs.JobManager`** — `submit(fn, kind) -> job_id`, `get(job_id)`; a failing job never kills the worker.
+- **Frontend rule:** all text is inserted via `textContent`/`el()` (never `innerHTML`) because file names come from disk. Never pass `null` to `append`/`replaceChildren` (it prints "null").
 
 ---
 
-## Platform Constraints  [TO BE FILLED]
+## Schema Reference
 
-> Target OS(es), platform-specific libraries and their guards, hardware dependencies and dev-mode equivalents.
+- DDL: `studio/migrations/001_init.sql` (tables `projects`, `batches`, `images`, `image_tags`). The database is created and owned by this app, so it is writable.
+- Inspect: `python -c "import sqlite3; c=sqlite3.connect('data/studio.sqlite'); print(c.execute('select * from projects').fetchall())"` or any SQLite browser. Do not edit rows by hand while the app runs.
+- Adding schema: new file `studio/migrations/NNN_name.sql` (next number, no gaps). Never edit an applied migration. Update this section and the tests in the same commit.
+- Annotations arrive in Stage 2 as a new migration.
 
-_Not yet filled — update before the first session._
+---
+
+## Key Conventions
+
+- **`images.width` / `images.height`** are the **EXIF-oriented** dimensions (what a browser shows). The stored original is untouched. Orientations 5–8 swap width and height: `if orientation in {5,6,7,8}: width, height = raw_height, raw_width`. All future annotation coordinates are pixels in this oriented space, origin top-left.
+- **`images.split`** — `NULL` means *unassigned* (API/UI name: `unassigned`); otherwise `train` | `val` | `test` (CHECK constraint).
+- **`images.sha256`** — hash of the original file bytes; `UNIQUE(project_id, sha256)` is the duplicate rule. Stored file name is `<sha256><lower-case ext>`; thumbnail is `<sha256>.jpg`.
+- **Image URLs** carry `?v=<first 12 hex of sha256>` and are served `immutable`; the id alone is not a cache key (ids can be reused after deletes).
+- **Tags** are trimmed, lower-case, de-duplicated (`repo.clean_tags`); limits in `config.yaml` → `tags`.
+- **Project names** are whitespace-collapsed and unique (case-sensitive in SQL; listing is case-insensitive).
+- **Timestamps** are UTC ISO-8601 with `Z`, from `db.utc_now()`.
+- **Config:** all tunables live in `config.yaml`; paths only via `studio/paths.py`.
+
+---
+
+## Data Files
+
+Everything under `data/` is runtime-generated and **gitignored — never commit it** (Development Rule 3).
+
+| Path | Contents |
+|------|----------|
+| `data/studio.sqlite` (+ `-wal`, `-shm`) | The database |
+| `data/projects/<id>/images/` | Copies of imported originals |
+| `data/projects/<id>/thumbs/` | JPEG thumbnails |
+| `data/tmp/import_*` | Scratch folders for zip extraction; removed after each import |
+
+Deleting a project deletes its rows and its `projects/<id>` folder.
+
+---
+
+## Platform Constraints
+
+- Developed and tested on **Windows 11 / Python 3.13**. Code is OS-neutral (pathlib everywhere); no OS-specific branches yet. Linux/macOS are untested.
+- GPU: PyTorch CUDA build from the `cu130` index (see `requirements.txt`). No hardware-dependent code exists in v0.1; hardware samplers (Stage 5) must guard their imports (`try/except ImportError`) and ship fakes.
+- Browsers: the UI needs ES modules, `<dialog>`, CSS custom properties and `prefers-color-scheme` (any current Chrome/Edge/Firefox/Safari).
 
 ---
 
@@ -153,11 +195,15 @@ _Not yet filled — update before the first session._
 
 ---
 
-## Known Technical Debt  [TO BE FILLED]
+## Known Technical Debt
 
-> Existing rule violations (file + line), temporary workarounds. Do not omit — document so debt is not accidentally perpetuated.
-
-_None recorded yet._
+- **Imports cannot be cancelled** (`studio/jobs.py`, `web/js/views/gallery.js`). `docs/UX.md` §1.3 asks for a cancel button on tasks over 10 s. The dialog can be hidden; the import keeps running. Fix with cooperative cancellation in `importer._run` (check a flag per file).
+- **Import speed is I/O-bound**: ~36 images/s on 1024×768 JPEGs (2,000 in 55.8 s, measured 2026-11-06, synthetic fresh files). One file at a time. Parallel read/decode (threads) is the next lever if datasets grow beyond a few thousand.
+- **Startup migration runs once at `create_app`**, not per process start of workers; fine for one process, revisit with Stage 8 workers.
+- **Splits are not stratified** (no labels yet); revisit in Stage 2/3.
+- **Test client deprecation warning**: Starlette prefers `httpx2` for `TestClient`; the install was blocked in-session, so tests use `httpx` 0.28.1 and show one warning.
+- **Auto-split on a filtered view** always acts on the whole project, not the visible subset.
+- **No browser test suite**: UI behaviour was verified by a one-off DevTools-protocol script (`docs/` does not keep it). Add Playwright-style tests before Stage 2.
 
 ---
 

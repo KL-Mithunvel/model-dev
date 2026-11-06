@@ -22,7 +22,8 @@
 - [x] ~~Write the multi-stage plan~~ — DONE: `docs/PLAN.md` (3c1a6a3). Multi-agent part deferred (see below).
 - [x] ~~Decide where the app lives~~ — DECIDED: on `main`, no new repo; Branch Policy updated.
 - [ ] Discuss and agree the multi-agent process (roles, worktrees, merge rules) in detail before Stage 1 code.
-- [ ] G1: write `docs/FEATURES.md` (clean-room notes on the reference platform) and `docs/FORMATS.md` (COCO/YOLO/CVAT/Label Studio).
+- [x] G1: wrote `docs/FEATURES.md` and `docs/FORMATS.md` (2026-11-06). Cleared for planning.
+- [ ] Before Stage 3: verify every `[U]` (unverified) line in `docs/FORMATS.md` (COCO spec, CVAT XML, Label Studio polygon/keypoint, licences) and add golden sample files under `tests/data/formats/`.
 - [ ] G2: create venv, `requirements.txt`, `config.yaml`, `.env.example`, pytest skeleton; install CUDA torch and verify the GPU on Python 3.13 (else 3.12).
 - [ ] G3: owner to confirm worker machines (OS, GPU, network) and needed export targets.
 - [ ] Owner to read Roboflow's Terms of Service before further study.

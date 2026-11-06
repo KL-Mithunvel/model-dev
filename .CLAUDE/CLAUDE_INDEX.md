@@ -33,6 +33,8 @@ Master index of all documents in this `.CLAUDE/` library. Every new project-base
 |------|------|-----------|
 | [../docs/PLAN.md](../docs/PLAN.md) | Local Vision Studio plan: decisions, architecture, gates, stages and versions, risks | Start of every session on the app |
 | [../docs/UX.md](../docs/UX.md) | UX rules from Apple HIG principles: tokens, accessibility, shortcuts, per-screen checklist | Before building or reviewing any screen |
+| [../docs/FEATURES.md](../docs/FEATURES.md) | Clean-room notes on the reference platform's features and our approach per feature (Gate G1) | Before designing any feature |
+| [../docs/FORMATS.md](../docs/FORMATS.md) | COCO / YOLO / CVAT / Label Studio format summaries, verified vs unverified marked | Before Stage 3 and any import/export code |
 | [../docs/REA.md](../docs/REA.md) | How the third-party REA tool is cloned, pinned, reviewed and allowed to be used (clean-room rule) | Before using or installing REA |
 
 ## Skills

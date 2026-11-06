@@ -240,27 +240,31 @@ def apply_splits(
     ratios: Mapping[str, float],
     seed: int,
     only_unassigned: bool,
-) -> dict[str, int]:
-    """Randomly assign splits to a project's images; returns how many went to each split.
+) -> tuple[dict[str, int], dict[str, list[int]]]:
+    """Randomly assign splits to a project's images.
+
+    Returns ``(assigned_counts, previous)`` where ``previous`` maps each former split
+    (``train``/``val``/``test``/``unassigned``) to the image ids that had it, so a caller can undo.
 
     Raises:
         ValueError: invalid ratios.
     """
     splits.validate_ratios(ratios)
     condition = " AND split IS NULL" if only_unassigned else ""
-    ids = [
-        row["id"]
-        for row in conn.execute(
-            f"SELECT id FROM images WHERE project_id = ?{condition} ORDER BY id", (project_id,)
-        )
-    ]
-    assignment = splits.assign_splits(ids, ratios, seed)
+    before = conn.execute(
+        f"SELECT id, split FROM images WHERE project_id = ?{condition} ORDER BY id", (project_id,)
+    ).fetchall()
+    previous: dict[str, list[int]] = {name: [] for name in SPLIT_FILTERS}
+    for row in before:
+        previous[row["split"] or UNASSIGNED].append(row["id"])
+    assignment = splits.assign_splits([row["id"] for row in before], ratios, seed)
     conn.executemany(
         "UPDATE images SET split = ? WHERE id = ?",
         [(name, image_id) for image_id, name in assignment.items()],
     )
     conn.commit()
-    return {name: list(assignment.values()).count(name) for name in splits.SPLIT_NAMES}
+    counts = {name: list(assignment.values()).count(name) for name in splits.SPLIT_NAMES}
+    return counts, previous
 
 
 # ---- batches --------------------------------------------------------------------------------

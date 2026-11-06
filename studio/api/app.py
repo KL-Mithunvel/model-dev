@@ -285,11 +285,13 @@ def create_app(
         ratios = body.ratios if body.ratios is not None else defaults["default_ratios"]
         seed = body.seed if body.seed is not None else defaults["default_seed"]
         try:
-            assigned = repo.apply_splits(conn, project_id, ratios, seed, body.only_unassigned)
+            assigned, previous = repo.apply_splits(
+                conn, project_id, ratios, seed, body.only_unassigned
+            )
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
         counts = need_project(conn, project_id)["split_counts"]
-        return {"assigned": assigned, "split_counts": counts}
+        return {"assigned": assigned, "split_counts": counts, "previous": previous}
 
     if WEB_DIR.is_dir():
         app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

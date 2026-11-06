@@ -232,6 +232,12 @@ def test_manual_and_automatic_splits(client, project, tmp_path):
     counts = auto.json()["split_counts"]
     assert counts["test"] >= 2 and sum(v for k, v in counts.items() if k != "unassigned") == 10
 
+    # "previous" lets the UI undo: restore each former group
+    previous = auto.json()["previous"]
+    assert sorted(previous["unassigned"]) == sorted(ids[2:]) and previous["test"] == []
+    client.put(split_url, json={"image_ids": previous["unassigned"], "split": None})
+    assert client.get(url, params={"split": "unassigned"}).json()["total"] == 8
+
     again = client.post(
         f"{split_url}/auto",
         json={"only_unassigned": False, "seed": 3, "ratios": {"train": 1.0}},

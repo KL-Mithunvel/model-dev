@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Local Vision Studio</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%230062cc'/%3E%3Cpath d='M5 8h14v9H5zM9 8l1.5-2h3L15 8' fill='none' stroke='white' stroke-width='1.6' stroke-linejoin='round'/%3E%3Ccircle cx='12' cy='12.5' r='2.4' fill='none' stroke='white' stroke-width='1.6'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="shell">
+    <nav class="sidebar" id="sidebar" aria-label="Main navigation"></nav>
+    <div class="main-col">
+      <header class="toolbar">
+        <button class="btn btn-quiet btn-icon" id="menu-toggle" type="button" aria-label="Show navigation" aria-controls="sidebar"></button>
+        <h1 class="grow" id="title">Local Vision Studio</h1>
+        <div class="toolbar-actions" id="toolbar-actions"></div>
+      </header>
+      <main id="main" tabindex="-1"></main>
+    </div>
+  </div>
+  <div id="toasts" role="status" aria-live="polite"></div>
+  <noscript><p style="padding:1rem">Local Vision Studio needs JavaScript to run.</p></noscript>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

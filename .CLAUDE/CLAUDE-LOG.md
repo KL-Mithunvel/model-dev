@@ -17,6 +17,7 @@
 - Cloned `morluto/rea` (shallow, `ad518cf`, v6.8.0) into `tools/rea/`, added it to `.gitignore`, reviewed DISCLAIMER, SECURITY and `install.sh`. Did not run `npm install` or `rea setup`: Node here is v24.16.0 and REA needs ≥ 24.22.1.
 - REA's DISCLAIMER excludes tampering with online services and copying proprietary code/assets, so it will not be pointed at Roboflow's hosted client; the clean-room scope stays public docs, open-source repos and own-account behaviour. Recorded in the new `docs/REA.md`.
 - Wrote `docs/UX.md` (1f23679) and `docs/PLAN.md` (3c1a6a3); updated `.CLAUDE/CLAUDE.md` (Branch Policy now allows the app on `main`; Project Overview, Preflight Gates and Development Rules filled). Remaining template sections stay `[TO BE FILLED]` until code lands.
+- REA set up with owner approval: `winget upgrade OpenJS.NodeJS.LTS` → Node 26.13.0; `npm install --global rea-agents@6.8.0`; dry-run of `rea setup` shown, then `rea setup --client claude_code --yes` applied (edited `~/.claude.json` with backup, installed skill). Doctor healthy; no analysis engine installed; `frida` install script left blocked. Setup command exited 255 only because the environment check found no engine.
 - Owner message ".+3" arrived mid-session and was unintelligible; asked for a resend. Not acted on.
 - Compute survey, full laptop: Dell Precision 3591, Core Ultra 7 155H (16C/22T), 31.5 GB RAM, RTX 1000 Ada 6 GB, Intel Arc iGPU, 410 GB free disk, Python 3.13.7, torch not installed.
 

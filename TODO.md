@@ -27,7 +27,7 @@
 - [ ] G3: owner to confirm worker machines (OS, GPU, network) and needed export targets.
 - [ ] Owner to read Roboflow's Terms of Service before further study.
 - [ ] Choose project name, accent colour/density, and final licence.
-- [ ] Owner: upgrade Node to ≥ 24.22.1, then install REA and run `rea setup` (see `docs/REA.md`); currently blocked on Node v24.16.0.
+- [x] Node upgraded to 26.13.0, REA 6.8.0 installed and registered with Claude Code only (see `docs/REA.md`). Owner: restart Claude Code to load it.
 - [ ] Choose a first allowed REA target (open-source or owned software; not Roboflow's hosted client).
 - [x] ~~Clean-room study ... documented under `docs/`~~ — superseded by the G1 item above (`docs/FEATURES.md`).
 - [x] ~~Run `tools/compute_survey.py`~~ — DONE 2026-11-06 (RTX 1000 Ada 6 GB, 31.5 GB RAM, 22 threads); recorded in the log.

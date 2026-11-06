@@ -8,8 +8,11 @@ REA ("Reverse Engineer Anything") is an MIT-licensed MCP server (npm package `re
 |------|-------|
 | Local clone | `tools/rea/` — shallow clone, **gitignored, not committed** |
 | Pinned commit | `ad518cff65cc71564f678b26bcae4a3862689ad4` (package `rea-agents` 6.8.0, 2026-11-06) |
-| Installed / registered with Claude Code | **No.** `npx rea-agents setup` has not been run |
-| Blocker | Node.js on this machine is v24.16.0; REA needs `^22.23.4 \|\| ^24.22.1 \|\| >=26.12.1`. Upgrade Node first (owner's decision). |
+| Node.js | Upgraded 2026-11-06 from 24.16.0 to **26.13.0** via `winget upgrade OpenJS.NodeJS.LTS` (npm 11.20.0). REA needs `^22.23.4 \|\| ^24.22.1 \|\| >=26.12.1`. |
+| Installed | `npm install --global rea-agents@6.8.0` (user prefix `%APPDATA%\npm`); `rea --version` → 6.8.0 |
+| Registered with Claude Code | **Yes** (2026-11-06): `rea setup --client claude_code --yes` edited `%USERPROFILE%\.claude.json` (backup `.claude.json.rea.backup`) and installed the skill at `%USERPROFILE%\.claude\skills\reverse-engineer-anything`. Restart Claude Code to load it. Other clients were not configured. |
+| Doctor | `healthy: true`; `environment_healthy: false` because no analysis engine is configured (command exits 255 for that reason) |
+| Skipped | `frida` install script blocked by npm (only needed for runtime instrumentation); Ghidra, IDA, JADX, Kuna not installed |
 
 Why a gitignored clone and not vendored source: REA is a tool our agents call, not a library our app imports. Committing 7,000+ third-party files would bloat history and blur licences. Re-create the clone with:
 
@@ -33,6 +36,7 @@ REA's own DISCLAIMER.md excludes "tampering with online services", accessing sys
 - Roboflow's Terms of Service should still be read by the owner before any further study; this file does not give legal advice.
 
 ## Next steps (owner decisions)
-1. Upgrade Node to ≥ 24.22.1 (or 22.23.4+/26.12.1+) if REA is wanted.
-2. Run `npm install --global rea-agents`, then `rea setup` and review its plan.
-3. Pick a first allowed target (see TODO.md).
+1. Restart Claude Code so the REA MCP server and skill load; run `rea doctor` to re-check.
+2. Pick a first allowed target (see TODO.md). Static JavaScript/Electron analysis works without an engine, e.g. `rea analyze-javascript-application <path> --json`.
+3. Native binaries need an engine: Ghidra 12.1.x + JDK (set `GHIDRA_INSTALL_DIR`), or Hopper/IDA/Kuna. Not installed; ask before adding.
+4. To undo: restore `%USERPROFILE%\.claude.json.rea.backup`, delete the skill folder above, `npm uninstall --global rea-agents`.

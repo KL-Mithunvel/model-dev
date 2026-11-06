@@ -91,8 +91,24 @@ python -m py_compile studio\*.py
 python -m ruff check .
 python -m pytest -q                 # GPU-marked tests skip themselves when no CUDA GPU is present
 python tools\compute_survey.py      # CPU / RAM / disk / GPU survey
-python tools\ui_smoke.py            # browser checks (needs Edge or Chrome; starts its own server)
 ```
+
+### Run the app in a real browser and drive it like a user (`tools/dev_run.py`)
+
+```powershell
+python tools\dev_run.py list                       # scenarios in tools\scenarios\
+python tools\dev_run.py run smoke                  # VISIBLE Edge window, watchable pace (default)
+python tools\dev_run.py run smoke --headless       # no window, full speed (quick checks / CI-style)
+python tools\dev_run.py run tour --pace 1.5        # narrated demo, slower
+python tools\dev_run.py open                       # app + demo data + browser for YOU; Ctrl+C stops all
+```
+
+- It starts the app on a free port with throwaway data (never `data/`), opens a browser with a throwaway profile (never your own Edge profile), and stops every process it started.
+- Input is **real**: mouse moves along an eased path, clicks, double clicks, drags, wheel, keys and typing arrive as trusted events. The OS pointer itself cannot be moved; a red on-page cursor, click ripples and a narration banner show where the script is.
+- It refuses to click an element a user could not click (covered by another element or zero-sized) and waits for the element to stop moving first. It re-finds elements every frame, because the app may re-render them.
+- Needs Edge or Chrome (`STUDIO_BROWSER` or `--browser` to override). Screenshots of each run go to `data/dev_runs/` (gitignored, last 8 runs). Exit code 0 = all checks passed.
+- Add a scenario: a file in `tools/scenarios/` with `DESCRIPTION`, optional `CONFIG` (config overrides), and `async def run(s)`; see `smoke.py`. API: `s.goto`, `s.click`, `s.drag`, `s.wheel`, `s.press("Ctrl+Z")`, `s.type_text`, `s.say`, `s.shot`, `s.check`, `s.wait_for`, `s.js`, `s.api`.
+- `tools/ui_smoke.py` is a shim for `run smoke --headless`.
 
 ```powershell
 python -m studio                    # http://127.0.0.1:8000 (host/port from config.yaml)
@@ -119,6 +135,7 @@ Status: **v0.1** (data core + app shell). Later stages: `docs/PLAN.md`.
 | `studio/jobs.py` | One-worker in-process job runner with progress snapshots |
 | `studio/api/app.py` | FastAPI app factory `create_app`; serves `studio/web/` |
 | `studio/__main__.py` | `python -m studio` launcher |
+| `tools/dev_run.py`, `tools/devbrowser.py`, `tools/scenarios/` | Dev tool: run the app in a real browser and drive/test it (see Running the System) |
 | `studio/web/` | Vanilla-JS UI: `css/tokens.css` (design tokens), `css/app.css`, `js/{main,ui,api,palette,limits}.js`, `js/views/{projects,gallery}.js` |
 
 ```
@@ -204,7 +221,8 @@ _Not yet filled — update before the first session._
 - **Splits are not stratified** (no labels yet); revisit in Stage 2/3.
 - **Test client deprecation warning**: Starlette prefers `httpx2` for `TestClient`; the install was blocked in-session, so tests use `httpx` 0.28.1 and show one warning.
 - **Auto-split on a filtered view** always acts on the whole project, not the visible subset.
-- **Browser checks are a dev tool, not in `pytest`**: `tools/ui_smoke.py` (15 checks: skip link, focus after load-more/split, Space, tag filter, router race, import cancel/delete guard) needs Edge or Chrome and is run by hand before a tag. Extend it with every UI bug fixed; consider a real test runner before Stage 2.
+- **Browser checks are a dev tool, not in `pytest`**: `tools/dev_run.py run smoke` (16 checks with real mouse/keyboard) needs Edge or Chrome and is run by hand before a tag. Extend `tools/scenarios/smoke.py` with every UI bug fixed. It does not run in CI (there is none yet).
+- **`dev_run` limits**: it cannot move the operating-system pointer or drive native pop-ups (for example the dropdown list of a `<select>`; the smoke scenario sets those values by script). Window size depends on the screen (1378×791 on this laptop).
 - **Zip import extracts everything to disk first** (up to `importing.max_zip_uncompressed_gb`), then imports; large zips need that much temporary space.
 - **Orphan files are possible** if the process dies between writing an image's files and committing its row. They are named by hash, so a re-import overwrites them; there is no sweeper yet.
 - **A 16384×16384 image** is within `images.max_side_px` but over Pillow's decompression-bomb limit, so it is reported as "oversize" with Pillow's message.

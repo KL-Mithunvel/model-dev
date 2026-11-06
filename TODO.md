@@ -27,7 +27,9 @@
 - [x] v0.1 built in five commits (aa7024f, b09f5fc, 0c3e2ad, 074deeb, 0add954) — storage, importer, API, UI, speed-up.
 - [x] v0.1 independent reviewer pass done (verdict FAIL: 1 blocker + 10 should-fix); findings fixed in c46ca4f (backend) and the following frontend commit; verified by 84 tests + 15 browser checks.
 - [x] Tagged `v0.1` on 39f055f (2026-11-07), approved by the owner. No second reviewer pass was run.
-- [ ] Stage 2 (v0.2–v0.4, annotation): plan drafted in chat; owner approval pending before any code.
+- [x] Browser driver `tools/dev_run.py` (option A: own CDP driver, visible by default, real input, on-page cursor) built and verified: smoke 16/16 visible and headless; tour 4/4.
+- [ ] Stage 2 (v0.2–v0.4, annotation): plan drafted in chat; owner approval and answers to 3 questions (classification single/multi, explicit "no objects", key map) pending before any code.
+- [ ] dev_run: pace default for visible runs was chosen by me (1.0, `--pace 0` for instant) because the owner did not answer; confirm or change.
 - [ ] v0.1 follow-ups (technical debt in CLAUDE.md): parallel import, move browser checks into a real test runner, `httpx2` for the test client (install was blocked), orphan-file sweeper.
 - [x] G1: wrote `docs/FEATURES.md` and `docs/FORMATS.md` (2026-11-06). Cleared for planning.
 - [ ] Before Stage 3: verify every `[U]` (unverified) line in `docs/FORMATS.md` (COCO spec, CVAT XML, Label Studio polygon/keypoint, licences) and add golden sample files under `tests/data/formats/`.

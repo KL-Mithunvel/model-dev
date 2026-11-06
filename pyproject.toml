@@ -13,5 +13,6 @@ select = ["E", "F", "I", "B", "UP"]
 [tool.ruff.lint.per-file-ignores]
 # Generic template tool kept as-is; only line length is exempted.
 "tools/compute_survey.py" = ["E501"]
-# Holds many JavaScript one-liners inside strings; only line length is exempted.
-"tools/ui_smoke.py" = ["E501"]
+# Dev tools hold many JavaScript one-liners inside strings; only line length is exempted.
+"tools/*.py" = ["E501"]
+"tools/scenarios/*.py" = ["E501"]

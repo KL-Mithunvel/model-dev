@@ -148,7 +148,7 @@ main#main { flex: 1; min-height: 0; overflow: auto; outline: none; }
   border-left: 1px solid var(--border); background: var(--surface); padding: var(--sp-4);
   overflow: auto; display: flex; flex-direction: column; gap: var(--sp-4);
 }
-.inspector img { width: 100%; max-height: 240px; object-fit: contain; background: var(--surface-2); border-radius: var(--radius-control); }
+.inspector img { width: 100%; height: auto; max-height: 240px; object-fit: contain; background: var(--surface-2); border-radius: var(--radius-control); }
 .inspector h3 { font-size: var(--fs-15); font-weight: 600; word-break: break-all; }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-1) var(--sp-3); font-size: var(--fs-13); }
 .kv dt { color: var(--text-2); } .kv dd { margin: 0; }

@@ -304,7 +304,8 @@ export async function mount(container, { setToolbar, projectId }) {
     if (chosen.length === 1) {
       const item = chosen[0];
       inspector.replaceChildren(
-        el("img", { src: item.file_url, alt: `Preview of ${item.original_name}` }),
+        // width/height reserve the preview's space before it loads, so the controls below it do not jump
+        el("img", { src: item.file_url, alt: `Preview of ${item.original_name}`, width: String(item.width), height: String(item.height) }),
         el("h3", { text: item.original_name }),
         el("dl", { class: "kv num" },
           el("dt", { text: "Size" }), el("dd", { text: `${item.width} × ${item.height} px` }),

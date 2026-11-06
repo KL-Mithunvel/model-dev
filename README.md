@@ -27,6 +27,8 @@ venv\Scripts\python.exe -m pip install -r requirements.txt --extra-index-url htt
 venv\Scripts\activate
 python -m studio          # then open http://127.0.0.1:8000
 python -m pytest -q
+python tools\dev_run.py open     # app + demo data in a browser window; Ctrl+C to stop
+python tools\dev_run.py run tour # watch a narrated, scripted walk through the app
 ```
 
 Details, architecture and conventions: `.CLAUDE/CLAUDE.md`. Plan: `docs/PLAN.md`.

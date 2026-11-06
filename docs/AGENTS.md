@@ -17,6 +17,7 @@ Decided with the owner on 2026-11-06. Binding for every session. Cold-start agen
 1. **Plan** — Builder drafts the stage plan: goal, files to create/change, steps, tests, UX criteria, which model (A or B). Posts it to the owner.
 2. **Approval** — Owner says go (or edits). Nothing is built before this.
 3. **Build** — Builder works on a short-lived branch `v0.X/<topic>` (or in the main checkout for model A when the owner prefers), committing at each good step (owner request: never lose progress). Docs, TODO and log are updated in the same commits.
+   **Build–run–look loop for every UI change** (owner request, 2026-11-07): write the code → `pytest` + `ruff` → `python tools/dev_run.py run <scenario>` in the **visible** browser (default) → read the screenshots in `data/dev_runs/` → fix → repeat. Add or extend a scenario for the behaviour you built, using real mouse/keyboard steps. Use `--headless` for fast repeat runs. Do not touch the browser window while a visible scenario runs.
 4. **QA** — a fresh-context Reviewer agent runs the checklist in §4 against the diff. It may not edit code; it reports findings. Builder fixes; Reviewer re-checks.
 5. **Merge** — fast-forward or merge commit to `main` once QA passes. Delete the branch.
 6. **Tag request** — Builder reports results (tests, UX checklist, known gaps) and asks the owner to approve the tag. Tag only after approval.
@@ -45,6 +46,7 @@ Decided with the owner on 2026-11-06. Binding for every session. Cold-start agen
 ## 4. QA checklist (Reviewer)
 - [ ] `python -m pytest -q` passes; new behaviour has tests (happy path + failure modes + edge cases).
 - [ ] `python -m ruff check .` clean; `python -m py_compile` clean.
+- [ ] For any UI change: run `python tools/dev_run.py run smoke --headless` (and the scenario for the new feature) yourself and look at the screenshots; do not trust the Builder's report. A scenario failure that only appears at full speed is a lead for a real race or layout shift, not noise.
 - [ ] **Development Rules 1–9** (see `CLAUDE.md`): no data leaves the machine; neutral storage; no dataset in git; no YOLO import in core; clean-room respected; UX checklist; no hard-coded hardware/tunables; fakes for samplers/backends; docs and tests in the same commit.
 - [ ] New dependency or weight: licence recorded, compatible with the permissive core; pinned in `requirements.txt` with a reason.
 - [ ] UX checklist in `docs/UX.md` §9 for every new or changed screen (keyboard-only, contrast, states, undo, progress).

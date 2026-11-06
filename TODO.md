@@ -28,7 +28,9 @@
 - [x] v0.1 independent reviewer pass done (verdict FAIL: 1 blocker + 10 should-fix); findings fixed in c46ca4f (backend) and the following frontend commit; verified by 84 tests + 15 browser checks.
 - [x] Tagged `v0.1` on 39f055f (2026-11-07), approved by the owner. No second reviewer pass was run.
 - [x] Browser driver `tools/dev_run.py` (option A: own CDP driver, visible by default, real input, on-page cursor) built and verified: smoke 16/16 visible and headless; tour 4/4.
-- [ ] Stage 2 (v0.2–v0.4, annotation): plan drafted in chat; owner approval and answers to 3 questions (classification single/multi, explicit "no objects", key map) pending before any code.
+- [x] Stage 2 plan approved by owner 2026-11-07 (single-label, explicit "no objects", key map as proposed); written into `docs/PLAN.md`.
+- [ ] Stage 2 v0.2 (boxes + classification): 2.1 backend → 2.2 shell → 2.3 box tool → 2.4 flow; then independent review and owner tag approval.
+- [ ] Stage 2 v0.3 (polygons) and v0.4 (keypoints): after v0.2 is tagged.
 - [ ] dev_run: pace default for visible runs was chosen by me (1.0, `--pace 0` for instant) because the owner did not answer; confirm or change.
 - [ ] v0.1 follow-ups (technical debt in CLAUDE.md): parallel import, move browser checks into a real test runner, `httpx2` for the test client (install was blocked), orphan-file sweeper.
 - [x] G1: wrote `docs/FEATURES.md` and `docs/FORMATS.md` (2026-11-06). Cleared for planning.

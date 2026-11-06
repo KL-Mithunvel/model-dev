@@ -87,10 +87,29 @@ Goal: create a project, import images, see them in a gallery.
 
 ### Stage 2 — Annotation (v0.2–v0.4)
 Goal: a fast, forgiving annotator.
-- **2.1 Boxes + classification (v0.2)** — Canvas with zoom/pan, box draw/resize/move, class list with hotkeys (1–9), image-level labels, unlimited undo/redo, autosave, filmstrip, progress ("412 / 2000 labelled").
-- **2.2 Polygons (v0.3)** — Vertex add/move/delete, close on first point, hole-free polygons, simplification option.
-- **2.3 Keypoints (v0.4)** — Skeleton definitions per class, visibility flags, drag points, copy skeleton from previous image.
-  Success: 20 boxes drawn with no menu trips; undo/redo through 100 steps is exact; no data loss after a browser crash (autosave test); keyboard-only annotation works.
+**Approved by the owner 2026-11-07** with these decisions: classification is **single-label** (one class per image, `images.label_class_id`); "no objects" is an **explicit action** (`images.marked_empty`); key map as below. Agent model A; an independent review runs before each tag and **the owner approves each tag**.
+
+**Design decisions**
+| Topic | Decision |
+|-------|----------|
+| Coordinates | Pixels on the EXIF-oriented image, origin top-left (matches `images.width/height`) |
+| Drawing surface | SVG overlay on the image inside a zoom/pan container (handles are real elements) |
+| Saving | Autosave with replace-all `PUT /api/images/{id}/annotations` carrying a revision number (409 on conflict). A synchronous `localStorage` draft is written on every edit and cleared after a successful save, so a killed tab loses nothing |
+| Undo/redo | Client-side history of immutable snapshots (pure JS module, unit-tested with `node --test`) |
+| "Labelled" | An image is labelled if it has ≥ 1 annotation, **or** is marked "no objects", **or** has an image label |
+| Classes | Per project: name (unique, case-insensitive), colour from a colour-blind-safe palette in `config.yaml`, optional skeleton (v0.4). One class can be used for boxes and polygons |
+| Validation | Server validates every annotation (bounds, minimum size, class belongs to project, kind-specific shape); box, polygon and keypoint validators exist from v0.2 so v0.3/v0.4 only add UI |
+
+**Key map**: tools `V` select · `B` box · `P` polygon (v0.3) · `K` keypoint (v0.4) · `H` pan (or hold Space and drag) · wheel zoom · `0` fit · `+`/`−` zoom · `A`/`D` previous/next image · `N` next unlabelled · `E` toggle "no objects" · `1`–`9` active class (or class of the selection) · `Shift+1`–`9` image label · arrows nudge (Shift ×10) · Alt+arrows resize · `Delete` · `Ctrl+D` duplicate · `Ctrl+Z` / `Ctrl+Shift+Z` (or `Ctrl+Y`) · `Esc` cancel/deselect · `Enter` in the box tool drops a default box at the view centre (keyboard-only drawing) · `Tab` inside the image area cycles annotations (and leaves the area after the last one, so keyboard users are never trapped).
+
+- **2.1 Backend (v0.2)** — migration `002_annotations.sql` (`classes`, `annotations`, `images.marked_empty`, `images.label_class_id`, `images.annotations_rev`); `studio/annotations.py` (pure validation); repo + API: classes CRUD (delete of a used class needs `force`), image annotations GET/PUT with revision check, project annotation stats, neighbours endpoint (prev/next/next-unlabelled), gallery filters (labelled/unlabelled, class) and per-image counts.
+- **2.2 Annotator shell (v0.2)** — route `#/projects/:id/annotate/:imageId`; tool strip, stage with zoom/pan, inspector (image label, classes, annotation list), filmstrip, save indicator, saver with debounce/queue/draft recovery; pure modules `geometry.js`, `history.js`, `editor.js`, `saver.js`.
+- **2.3 Box tool and editing (v0.2)** — draw, move, resize (8 handles), delete, duplicate, nudge, class change, unlimited undo/redo, keyboard-only drawing.
+- **2.4 Flow (v0.2)** — "no objects", next unlabelled, "repeat previous image's boxes", progress bar, gallery badges/filters and "Annotate" entry points.
+- **2.5 Polygons (v0.3)** — click to add vertices, close on first point/Enter, move/add/delete vertices, simplify.
+- **2.6 Keypoints (v0.4)** — skeleton editor per class, sequential placement with visibility (0 not labelled, 1 hidden, 2 visible), drag points, copy skeleton from previous image.
+
+**Success criteria**: 20 boxes drawn with no menu trips; undo/redo through 100 steps restores the exact state; no data loss when the tab is killed right after an edit; keyboard-only annotation works; pan/zoom stays smooth with 200 annotations (measured, provisional); EXIF-rotated images line up (browser check); all of `docs/UX.md` §9; `pytest`, `node --test`, and `tools/dev_run.py` scenarios (real mouse drawing, undo, reload persistence) pass; independent review before each tag.
 
 ### Stage 3 — Formats and versions (v0.5)
 Goal: no lock-in; reproducible datasets.

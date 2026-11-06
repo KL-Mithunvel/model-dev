@@ -9,6 +9,7 @@ Stored ``width``/``height`` are the EXIF-oriented dimensions, i.e. what a browse
 """
 
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -25,6 +26,8 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from studio import paths
 from studio.db import utc_now
 
+_EXIF_ORIENTATION = 0x0112
+_SWAPPING_ORIENTATIONS = {5, 6, 7, 8}  # EXIF orientations that rotate by 90 degrees (swap w/h)
 _CHUNK = 1024 * 1024
 _BYTES_PER_MB = 1024 * 1024
 _BYTES_PER_GB = 1024**3
@@ -120,25 +123,31 @@ def _make_thumbnail(image: Image.Image, size: int) -> Image.Image:
 
 
 def _classify_and_store(
-    path: Path, config: dict[str, Any], project_id: int, sha: str
+    path: Path, data: bytes, config: dict[str, Any], project_id: int, sha: str
 ) -> tuple[str, dict[str, Any] | str]:
-    """Validate one image and write its files.
+    """Validate one image (already read into ``data``) and write its files.
+
+    The file is read from disk once and the bytes are reused for hashing, decoding and the
+    stored copy: on Windows each extra open of a new file is slow (file scanning).
 
     Returns ``("ok", info)`` or ``(outcome, reason)`` where outcome is ``"corrupt"`` or
     ``"oversize"``.
     """
     limits = config["images"]
     try:
-        with Image.open(path) as probe:
-            raw_width, raw_height = probe.size
+        with Image.open(io.BytesIO(data)) as image:
+            raw_width, raw_height = image.size  # from the header, nothing decoded yet
             if max(raw_width, raw_height) > limits["max_side_px"]:
                 return "oversize", f"{raw_width}x{raw_height} exceeds {limits['max_side_px']} px"
-            probe.verify()  # structural check; the file must be reopened afterwards
-        with Image.open(path) as image:
+            orientation = image.getexif().get(_EXIF_ORIENTATION, 1)
+            width, height = raw_width, raw_height
+            if orientation in _SWAPPING_ORIENTATIONS:
+                width, height = raw_height, raw_width
+            # JPEG only: decode at a reduced scale, which is much faster. The whole stream is still
+            # read, so truncated files still fail in load(). A no-op for other formats.
+            image.draft("RGB", (limits["thumbnail_px"] * 2, limits["thumbnail_px"] * 2))
             image.load()
-            oriented = ImageOps.exif_transpose(image)
-            width, height = oriented.size
-            thumb = _make_thumbnail(oriented, limits["thumbnail_px"])
+            thumb = _make_thumbnail(ImageOps.exif_transpose(image), limits["thumbnail_px"])
     except Image.DecompressionBombError as error:
         return "oversize", str(error)
     except (UnidentifiedImageError, OSError, SyntaxError, ValueError, EOFError) as error:
@@ -151,12 +160,12 @@ def _classify_and_store(
     images_folder.mkdir(parents=True, exist_ok=True)
     thumbs_folder.mkdir(parents=True, exist_ok=True)
     thumb.save(thumbs_folder / f"{sha}.jpg", format="JPEG", quality=85)
-    shutil.copy2(path, images_folder / stored_name)
+    (images_folder / stored_name).write_bytes(data)
     return "ok", {
         "stored_name": stored_name,
         "width": width,
         "height": height,
-        "bytes": path.stat().st_size,
+        "bytes": len(data),
     }
 
 
@@ -181,49 +190,59 @@ def _run(
         else:
             report.problems_dropped += 1
 
+    def import_one(path: Path, name: str) -> None:
+        """Process one file and record exactly one outcome on the report."""
+        if path.suffix.lower() not in allowed:
+            report.unsupported += 1
+            return
+        try:
+            if path.stat().st_size > max_bytes:
+                report.oversize += 1
+                add_problem(name, f"larger than {config['images']['max_file_mb']} MB")
+                return
+            data = path.read_bytes()
+        except OSError as error:
+            report.corrupt += 1
+            add_problem(name, f"Cannot read file: {error}")
+            return
+        sha = hashlib.sha256(data).hexdigest()
+        already = conn.execute(
+            "SELECT 1 FROM images WHERE project_id = ? AND sha256 = ?", (project_id, sha)
+        ).fetchone()
+        if already:
+            report.duplicates += 1
+            return
+        outcome, detail = _classify_and_store(path, data, config, project_id, sha)
+        if outcome == "ok":
+            conn.execute(
+                "INSERT INTO images (project_id, batch_id, sha256, stored_name, original_name,"
+                " width, height, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    project_id,
+                    batch_id,
+                    sha,
+                    detail["stored_name"],
+                    path.name,
+                    detail["width"],
+                    detail["height"],
+                    detail["bytes"],
+                    utc_now(),
+                ),
+            )
+            report.added += 1
+        elif outcome == "oversize":
+            report.oversize += 1
+            add_problem(name, str(detail))
+        else:
+            report.corrupt += 1
+            add_problem(name, str(detail))
+
     for index, path in enumerate(files, start=1):
         try:
             name = str(path.relative_to(display_root))
         except ValueError:
             name = path.name
-        if path.suffix.lower() not in allowed:
-            report.unsupported += 1
-        elif path.stat().st_size > max_bytes:
-            report.oversize += 1
-            add_problem(name, f"larger than {config['images']['max_file_mb']} MB")
-        else:
-            sha = sha256_of(path)
-            exists = conn.execute(
-                "SELECT 1 FROM images WHERE project_id = ? AND sha256 = ?", (project_id, sha)
-            ).fetchone()
-            if exists:
-                report.duplicates += 1
-            else:
-                outcome, detail = _classify_and_store(path, config, project_id, sha)
-                if outcome == "ok":
-                    conn.execute(
-                        "INSERT INTO images (project_id, batch_id, sha256, stored_name,"
-                        " original_name, width, height, bytes, created_at)"
-                        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (
-                            project_id,
-                            batch_id,
-                            sha,
-                            detail["stored_name"],
-                            path.name,
-                            detail["width"],
-                            detail["height"],
-                            detail["bytes"],
-                            utc_now(),
-                        ),
-                    )
-                    report.added += 1
-                elif outcome == "oversize":
-                    report.oversize += 1
-                    add_problem(name, str(detail))
-                else:
-                    report.corrupt += 1
-                    add_problem(name, str(detail))
+        import_one(path, name)
         if index % every == 0:
             conn.commit()
             if progress:

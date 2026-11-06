@@ -135,7 +135,22 @@ def _image_dict(row: sqlite3.Row, tags: list[str]) -> dict[str, Any]:
         "sha256": row["sha256"],
         "tags": tags,
         "created_at": row["created_at"],
+        "annotation_count": row["annotation_count"],
+        "marked_empty": bool(row["marked_empty"]),
+        "label_class_id": row["label_class_id"],
+        "annotations_rev": row["annotations_rev"],
     }
+
+
+# An image is "labelled" if it has an annotation, was marked "no objects", or has an image label.
+LABELLED_SQL = (
+    "(i.marked_empty = 1 OR i.label_class_id IS NOT NULL"
+    " OR EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = i.id))"
+)
+IMAGE_SELECT = (
+    "SELECT i.*, (SELECT COUNT(*) FROM annotations a WHERE a.image_id = i.id) AS annotation_count"
+    " FROM images i"
+)
 
 
 def _tags_for(conn: sqlite3.Connection, image_ids: Sequence[int]) -> dict[int, list[str]]:
@@ -165,14 +180,27 @@ def list_images(
     tag: str | None = None,
     batch_id: int | None = None,
     query: str | None = None,
+    labelled: bool | None = None,
+    class_id: int | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """Return one page of images and the total number matching the filters.
+
+    ``labelled`` True/False keeps labelled/unlabelled images; ``class_id`` keeps images that have
+    an annotation or the image label of that class.
 
     Raises:
         ValueError: ``split`` is not one of train/val/test/unassigned.
     """
     where = ["i.project_id = ?"]
     args: list[Any] = [project_id]
+    if labelled is not None:
+        where.append(LABELLED_SQL if labelled else f"NOT {LABELLED_SQL}")
+    if class_id is not None:
+        where.append(
+            "(i.label_class_id = ? OR EXISTS"
+            " (SELECT 1 FROM annotations a WHERE a.image_id = i.id AND a.class_id = ?))"
+        )
+        args.extend([class_id, class_id])
     if split is not None:
         if split not in SPLIT_FILTERS:
             raise ValueError(f"split must be one of {list(SPLIT_FILTERS)}")
@@ -191,7 +219,7 @@ def list_images(
     clause = " AND ".join(where)
     total = conn.execute(f"SELECT COUNT(*) FROM images i WHERE {clause}", args).fetchone()[0]
     rows = conn.execute(
-        f"SELECT i.* FROM images i WHERE {clause} ORDER BY i.id LIMIT ? OFFSET ?",
+        f"{IMAGE_SELECT} WHERE {clause} ORDER BY i.id LIMIT ? OFFSET ?",
         [*args, limit, offset],
     ).fetchall()
     tags = _tags_for(conn, [row["id"] for row in rows])
@@ -199,7 +227,7 @@ def list_images(
 
 
 def get_image(conn: sqlite3.Connection, image_id: int) -> dict[str, Any] | None:
-    row = conn.execute("SELECT * FROM images WHERE id = ?", (image_id,)).fetchone()
+    row = conn.execute(f"{IMAGE_SELECT} WHERE i.id = ?", (image_id,)).fetchone()
     if row is None:
         return None
     image = _image_dict(row, _tags_for(conn, [image_id])[image_id])

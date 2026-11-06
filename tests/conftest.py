@@ -42,6 +42,32 @@ def project(client):
     return client.post("/api/projects", json={"name": "Demo"}).json()
 
 
+def seed_images(
+    client, project_id: int, count: int, width: int = 200, height: int = 100
+) -> list[int]:
+    """Insert image rows directly (no files): fast set-up for annotation/API tests."""
+    conn = db.connect(client.app.state.db_path)
+    try:
+        batch = conn.execute(
+            "INSERT INTO batches (project_id, source, created_at) VALUES (?, 'seed', 'now')",
+            (project_id,),
+        ).lastrowid
+        ids = []
+        for i in range(count):
+            ids.append(
+                conn.execute(
+                    "INSERT INTO images (project_id, batch_id, sha256, stored_name, original_name,"
+                    " width, height, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'now')",
+                    (project_id, batch, f"seed{project_id}_{i}", f"seed{i}.png", f"seed{i}.png",
+                     width, height),
+                ).lastrowid
+            )
+        conn.commit()
+        return ids
+    finally:
+        conn.close()
+
+
 def wait_for_job(client, job_id, timeout=20.0):
     deadline = time.time() + timeout
     while time.time() < deadline:

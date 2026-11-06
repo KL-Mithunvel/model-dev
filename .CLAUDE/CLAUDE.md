@@ -129,7 +129,9 @@ Status: **v0.1** (data core + app shell). Later stages: `docs/PLAN.md`.
 | `studio/paths.py` | The only place data paths are built (`data_dir`, `db_path`, `project_dir`, `images_dir`, `thumbs_dir`) |
 | `studio/db.py` | SQLite connect + forward-only migrations (`connect`, `migrate`, `utc_now`) |
 | `studio/migrations/NNN_*.sql` | Schema, applied in order; version in `PRAGMA user_version` |
-| `studio/repo.py` | All SQL: projects, images, tags, splits, batches |
+| `studio/repo.py` | SQL: projects, images, tags, splits, batches; `LABELLED_SQL` (what "labelled" means) |
+| `studio/repo_annotations.py` | SQL: classes, annotations (replace-all save with revision lock), stats, neighbours |
+| `studio/annotations.py` | Pure validation of box / polygon / keypoint annotations (`validate_annotation`, `validate_set`) |
 | `studio/importer.py` | Folder/zip import: hash, validate, EXIF, thumbnail, report |
 | `studio/splits.py` | Pure train/val/test assignment (deterministic) |
 | `studio/jobs.py` | One-worker in-process job runner with progress snapshots |
@@ -163,10 +165,9 @@ Browser (studio/web) --HTTP/WebSocket--> FastAPI (api/app.py) --> repo.py --> SQ
 
 ## Schema Reference
 
-- DDL: `studio/migrations/001_init.sql` (tables `projects`, `batches`, `images`, `image_tags`). The database is created and owned by this app, so it is writable.
+- DDL: `studio/migrations/001_init.sql` (tables `projects`, `batches`, `images`, `image_tags`) and `002_annotations.sql` (`classes`, `annotations`; `images.marked_empty`, `images.label_class_id`, `images.annotations_rev`). The database is created and owned by this app, so it is writable.
 - Inspect: `python -c "import sqlite3; c=sqlite3.connect('data/studio.sqlite'); print(c.execute('select * from projects').fetchall())"` or any SQLite browser. Do not edit rows by hand while the app runs.
 - Adding schema: new file `studio/migrations/NNN_name.sql` (next number, no gaps). Never edit an applied migration. Update this section and the tests in the same commit.
-- Annotations arrive in Stage 2 as a new migration.
 
 ---
 
@@ -179,6 +180,9 @@ Browser (studio/web) --HTTP/WebSocket--> FastAPI (api/app.py) --> repo.py --> SQ
 - **Tags** are trimmed, lower-case, de-duplicated (`repo.clean_tags`); limits in `config.yaml` → `tags`.
 - **Project names** are whitespace-collapsed and unique (case-sensitive in SQL; listing is case-insensitive).
 - **Timestamps** are UTC ISO-8601 with `Z`, from `db.utc_now()`.
+- **Annotation geometry** (JSON in `annotations.data`, pixels of the oriented image, origin top-left, 2 decimals): box `{x, y, w, h}`; polygon `{points: [[x, y], ...]}`; keypoints `{points: [[x, y, v], ...]}` with `v` 0 not labelled (position stored as 0,0), 1 labelled but hidden, 2 visible. `images.annotations_rev` starts at 0 and +1 on every save; a save with a different `rev` gets 409 `{current_rev}`.
+- **Labelled** = has an annotation, or `marked_empty = 1` (explicit "no objects"), or `label_class_id` set (single-label classification). `marked_empty` and annotations are mutually exclusive.
+- **Classes**: name unique per project ignoring case; deleting a used class needs `?force=true` (deletes its annotations, clears image labels, bumps their revisions).
 - **Config:** all tunables live in `config.yaml`; paths only via `studio/paths.py`.
 
 ---

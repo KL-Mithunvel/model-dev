@@ -39,6 +39,19 @@ gallery:
   default_page_size: 60
   max_page_size: 200
 
+annotations:
+  max_per_image: 2000
+  max_points: 2000               # vertices per polygon / points per keypoint instance
+  min_box_px: 1                  # smallest box side the server accepts
+  min_polygon_area_px: 1         # polygons flatter than this are rejected
+  coord_tolerance_px: 0.5        # allowed overshoot past the image edge (rounding in browsers)
+  undo_limit: 500                # history steps kept in the browser
+  save_debounce_ms: 400          # wait this long after an edit before saving
+  filmstrip_size: 15             # thumbnails shown around the current image (odd number)
+  # Colour-blind-safe (Okabe-Ito) plus four more; new classes take the first unused colour.
+  palette: ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7",
+            "#999999", "#882255", "#44AA99", "#117733", "#AA4499"]
+
 splits:
   default_ratios: {train: 0.8, val: 0.1, test: 0.1}
   default_seed: 42

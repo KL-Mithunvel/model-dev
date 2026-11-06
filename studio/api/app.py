@@ -20,7 +20,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from studio import db, importer, paths, repo
+from studio import annotations, db, importer, paths, repo
+from studio import repo_annotations as annotations_repo
 from studio.config import load_config
 from studio.jobs import JobManager
 
@@ -44,6 +45,30 @@ class TagsRequest(BaseModel):
 class SetSplitRequest(BaseModel):
     image_ids: list[int]
     split: str | None
+
+
+class ClassCreate(BaseModel):
+    name: str
+    color: str | None = None
+
+
+class ClassUpdate(BaseModel):
+    name: str | None = None
+    color: str | None = None
+    position: int | None = None
+
+
+class AnnotationItem(BaseModel):
+    class_id: int
+    kind: str
+    data: dict[str, Any]
+
+
+class AnnotationsSave(BaseModel):
+    rev: int
+    annotations: list[AnnotationItem]
+    marked_empty: bool = False
+    label_class_id: int | None = None
 
 
 class AutoSplitRequest(BaseModel):
@@ -109,6 +134,13 @@ def create_app(
             "tag_max_length": config["tags"]["max_length"],
             "tags_per_image": config["tags"]["max_per_image"],
             "page_size": config["gallery"]["default_page_size"],
+            "class_name_max": config["projects"]["max_name_length"],
+            "palette": config["annotations"]["palette"],
+            "undo_limit": config["annotations"]["undo_limit"],
+            "save_debounce_ms": config["annotations"]["save_debounce_ms"],
+            "min_box_px": config["annotations"]["min_box_px"],
+            "max_annotations": config["annotations"]["max_per_image"],
+            "filmstrip_size": config["annotations"]["filmstrip_size"],
         }
 
     # ---- projects ---------------------------------------------------------------------------
@@ -228,6 +260,8 @@ def create_app(
         tag: str | None = None,
         batch_id: int | None = None,
         q: str | None = None,
+        labelled: bool | None = None,
+        class_id: int | None = None,
         conn: sqlite3.Connection = Conn,
     ) -> dict[str, Any]:
         need_project(conn, project_id)
@@ -243,6 +277,8 @@ def create_app(
                 tag=tag,
                 batch_id=batch_id,
                 query=q,
+                labelled=labelled,
+                class_id=class_id,
             )
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
@@ -299,6 +335,101 @@ def create_app(
             raise HTTPException(400, str(error)) from error
         repo.set_tags(conn, image_id, tags)
         return {"tags": tags}
+
+    # ---- classes ----------------------------------------------------------------------------
+    @app.get("/api/projects/{project_id}/classes")
+    def get_classes(project_id: int, conn: sqlite3.Connection = Conn) -> list[dict[str, Any]]:
+        need_project(conn, project_id)
+        return annotations_repo.list_classes(conn, project_id)
+
+    @app.post("/api/projects/{project_id}/classes", status_code=201)
+    def add_class(
+        project_id: int, body: ClassCreate, conn: sqlite3.Connection = Conn
+    ) -> dict[str, Any]:
+        need_project(conn, project_id)
+        try:
+            max_length = config["projects"]["max_name_length"]
+            name = annotations_repo.clean_class_name(body.name, max_length)
+            color = annotations_repo.clean_color(body.color) if body.color else None
+            return annotations_repo.create_class(
+                conn, project_id, name, color, config["annotations"]["palette"]
+            )
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        except annotations_repo.ClassExists as error:
+            raise HTTPException(409, str(error)) from error
+
+    @app.patch("/api/classes/{class_id}")
+    def change_class(
+        class_id: int, body: ClassUpdate, conn: sqlite3.Connection = Conn
+    ) -> dict[str, Any]:
+        try:
+            name = (
+                annotations_repo.clean_class_name(body.name, config["projects"]["max_name_length"])
+                if body.name is not None else None
+            )
+            color = annotations_repo.clean_color(body.color) if body.color is not None else None
+            updated = annotations_repo.update_class(conn, class_id, name, color, body.position)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        except annotations_repo.ClassExists as error:
+            raise HTTPException(409, str(error)) from error
+        if updated is None:
+            raise HTTPException(404, f"Class {class_id} not found.")
+        return updated
+
+    @app.delete("/api/classes/{class_id}", status_code=204)
+    def remove_class(
+        class_id: int, force: bool = False, conn: sqlite3.Connection = Conn
+    ) -> Response:
+        try:
+            found = annotations_repo.delete_class(conn, class_id, force)
+        except annotations_repo.ClassInUse as error:
+            return JSONResponse(
+                {"detail": str(error), "in_use": error.usage}, status_code=409
+            )
+        if not found:
+            raise HTTPException(404, f"Class {class_id} not found.")
+        return Response(status_code=204)
+
+    # ---- annotations ------------------------------------------------------------------------
+    @app.get("/api/images/{image_id}/annotations")
+    def get_image_annotations(image_id: int, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
+        result = annotations_repo.get_annotations(conn, image_id)
+        if result is None:
+            raise HTTPException(404, f"Image {image_id} not found.")
+        return result
+
+    @app.put("/api/images/{image_id}/annotations")
+    def put_image_annotations(
+        image_id: int, body: AnnotationsSave, conn: sqlite3.Connection = Conn
+    ) -> Any:
+        try:
+            new_rev = annotations_repo.save_annotations(
+                conn, image_id, body.rev, [item.model_dump() for item in body.annotations],
+                body.marked_empty, body.label_class_id, config["annotations"],
+            )
+        except annotations_repo.RevisionConflict as error:
+            return JSONResponse(
+                {"detail": str(error), "current_rev": error.current_rev}, status_code=409
+            )
+        except annotations.AnnotationError as error:
+            raise HTTPException(400, str(error)) from error
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from error
+        return {"rev": new_rev}
+
+    @app.get("/api/projects/{project_id}/annotation-stats")
+    def get_annotation_stats(project_id: int, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
+        need_project(conn, project_id)
+        return annotations_repo.annotation_stats(conn, project_id)
+
+    @app.get("/api/images/{image_id}/neighbours")
+    def get_neighbours(image_id: int, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
+        result = annotations_repo.neighbours(conn, image_id)
+        if result is None:
+            raise HTTPException(404, f"Image {image_id} not found.")
+        return result
 
     # ---- splits -----------------------------------------------------------------------------
     @app.put("/api/projects/{project_id}/split")

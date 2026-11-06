@@ -24,7 +24,7 @@
 - [ ] Discuss and agree the multi-agent process (roles, worktrees, merge rules) in detail before Stage 1 code.
 - [x] G1: wrote `docs/FEATURES.md` and `docs/FORMATS.md` (2026-11-06). Cleared for planning.
 - [ ] Before Stage 3: verify every `[U]` (unverified) line in `docs/FORMATS.md` (COCO spec, CVAT XML, Label Studio polygon/keypoint, licences) and add golden sample files under `tests/data/formats/`.
-- [ ] G2: create venv, `requirements.txt`, `config.yaml`, `.env.example`, pytest skeleton; install CUDA torch and verify the GPU on Python 3.13 (else 3.12).
+- [x] G2: venv, pinned `requirements.txt`, `config.yaml`, `.env.example`, `pyproject.toml`, pytest + ruff, `studio/config.py`; CUDA torch 2.14.1+cu130 verified on Python 3.13.7 (GPU matmul OK). 6 tests pass, lint clean (2026-11-06).
 - [ ] G3: owner to confirm worker machines (OS, GPU, network) and needed export targets.
 - [ ] Owner to read Roboflow's Terms of Service before further study.
 - [ ] Choose project name, accent colour/density, and final licence.

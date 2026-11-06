@@ -74,11 +74,26 @@ No application code is written until these are cleared and recorded in `.CLAUDE/
 
 ---
 
-## Running the System  [TO BE FILLED]
+## Running the System
 
-> Copy-paste-ready commands to start, test, and lint. Virtualenv activation first. Dev/simulation commands separated from hardware/production commands. Any seed-data or one-time setup steps.
+Windows (PowerShell), from the repo root. The venv lives in `venv/` (gitignored).
 
-_Not yet filled — update before the first session._
+```powershell
+# One-time setup (CUDA torch must come from the CUDA index — Gate G2)
+python -m venv venv
+venv\Scripts\python.exe -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu130
+
+# Every session
+venv\Scripts\activate
+
+# Check / test
+python -m py_compile studio\*.py
+python -m ruff check .
+python -m pytest -q                 # GPU-marked tests skip themselves when no CUDA GPU is present
+python tools\compute_survey.py      # CPU / RAM / disk / GPU survey
+```
+
+The app server (`python -m studio`) does not exist yet — it arrives in Stage 1.
 
 ---
 

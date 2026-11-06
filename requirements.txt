@@ -1,0 +1,19 @@
+# Local Vision Studio — pinned dependencies (CLAUDE-COMMON: pin at least the major version).
+# A migration to `uv` is planned; flag it when changing packaging.
+#
+# torch/torchvision must come from the CUDA index, NOT the default CPU wheel (Gate G2).
+# Install with:
+#   venv\Scripts\python.exe -m pip install -r requirements.txt \
+#       --extra-index-url https://download.pytorch.org/whl/cu130
+# Verified 2026-11-06 on Python 3.13.7 / RTX 1000 Ada (driver 596.71): torch.cuda.is_available() == True.
+torch==2.14.1+cu130
+torchvision==0.29.1+cu130
+numpy==2.5.4
+pillow==13.0.0
+
+# Configuration
+PyYAML==6.0.3
+
+# Dev / test
+pytest==9.2.0
+ruff==0.17.4

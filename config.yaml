@@ -1,0 +1,21 @@
+# Local Vision Studio — every tunable lives here (Development Rule 7). Nothing below is hard-coded in code.
+# Values marked "provisional" are starting points, not measured results.
+
+app:
+  host: 127.0.0.1          # local only by default (Development Rule 1)
+  port: 8000
+  data_dir: data           # gitignored; per-project folders are created below it
+
+images:                    # limits mirror common practice; provisional
+  max_file_mb: 30
+  max_side_px: 16384
+  allowed_extensions: [".jpg", ".jpeg", ".png", ".webp", ".bmp"]
+  thumbnail_px: 256
+
+hardware:
+  device: auto             # auto | cuda | cpu — resolved at runtime, never assumed
+  monitor_interval_s: 1.0  # provisional sampling period
+
+training:
+  seed: 42
+  vram_headroom_fraction: 0.10   # keep this share of VRAM free when suggesting batch size; provisional

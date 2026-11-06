@@ -7,6 +7,11 @@ app:
   allowed_hosts: [127.0.0.1, localhost]   # Host-header allowlist (DNS-rebinding guard)
   data_dir: data           # gitignored; per-project folders are created below it
 
+  job_poll_interval_s: 0.2 # how often the WebSocket checks a running job
+
+jobs:
+  keep_finished: 50        # finished jobs remembered for progress display
+
 projects:
   max_name_length: 80
 
@@ -19,6 +24,8 @@ images:                    # limits mirror common practice; provisional
   max_side_px: 16384
   allowed_extensions: [".jpg", ".jpeg", ".png", ".webp", ".bmp"]
   thumbnail_px: 256
+  thumbnail_quality: 85         # JPEG quality of thumbnails
+  thumbnail_draft_factor: 2     # JPEGs are decoded at >= this multiple of thumbnail_px (speed)
 
 database:
   filename: studio.sqlite  # created inside app.data_dir

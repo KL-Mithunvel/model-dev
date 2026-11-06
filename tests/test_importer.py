@@ -186,4 +186,5 @@ def test_helpers(tmp_path):
     assert sha256_of(a) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "b.bin").write_bytes(b"x")
-    assert [p.name for p in list_candidate_files(tmp_path)] == ["a.bin", "b.bin"]
+    files, skipped = list_candidate_files(tmp_path)
+    assert [p.name for p in files] == ["a.bin", "b.bin"] and skipped == []

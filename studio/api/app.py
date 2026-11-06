@@ -7,14 +7,15 @@ it must stay bound to ``127.0.0.1``.
 
 import asyncio
 import logging
+import shutil
 import sqlite3
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
-from fastapi.responses import FileResponse, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -59,7 +60,7 @@ def create_app(
     database_file = paths.db_path(config)
     with db.connect(database_file) as setup_conn:
         db.migrate(setup_conn)
-    jobs = JobManager()
+    jobs = JobManager(keep_finished=config["jobs"]["keep_finished"])
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -100,6 +101,16 @@ def create_app(
     def health() -> dict[str, Any]:
         return {"status": "ok", "version": app.version}
 
+    @app.get("/api/limits")
+    def limits() -> dict[str, Any]:
+        """Limits the UI mirrors, so there is one source of truth (config.yaml)."""
+        return {
+            "project_name_max": config["projects"]["max_name_length"],
+            "tag_max_length": config["tags"]["max_length"],
+            "tags_per_image": config["tags"]["max_per_image"],
+            "page_size": config["gallery"]["default_page_size"],
+        }
+
     # ---- projects ---------------------------------------------------------------------------
     @app.get("/api/projects")
     def list_projects(conn: sqlite3.Connection = Conn) -> list[dict[str, Any]]:
@@ -109,11 +120,14 @@ def create_app(
     def create_project(body: ProjectCreate, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
         try:
             name = repo.clean_name(body.name, config["projects"]["max_name_length"])
-            return repo.create_project(conn, name)
+            project = repo.create_project(conn, name)
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
         except repo.ProjectExists as error:
             raise HTTPException(409, str(error)) from error
+        # Row ids can be reused after a delete; never inherit files left over from an old project.
+        shutil.rmtree(paths.project_dir(config, project["id"]), ignore_errors=True)
+        return project
 
     @app.get("/api/projects/{project_id}")
     def get_project(project_id: int, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
@@ -121,8 +135,18 @@ def create_app(
 
     @app.delete("/api/projects/{project_id}", status_code=204)
     def delete_project(project_id: int, conn: sqlite3.Connection = Conn) -> Response:
+        if jobs.has_active(project_id):
+            raise HTTPException(
+                409, "An import is still running for this project. Cancel it first."
+            )
         if not repo.delete_project(conn, config, project_id):
             raise HTTPException(404, f"Project {project_id} not found.")
+        if paths.project_dir(config, project_id).exists():
+            # The rows are gone but some files could not be removed (for example, still open).
+            return JSONResponse(
+                {"warning": "The project was deleted, but some of its files could not be removed. "
+                 f"You can delete the folder by hand: {paths.project_dir(config, project_id)}"}
+            )
         return Response(status_code=204)
 
     # ---- imports ----------------------------------------------------------------------------
@@ -137,7 +161,7 @@ def create_app(
         if not (source.is_dir() or source.suffix.lower() == ".zip"):
             raise HTTPException(400, "Choose a folder or a .zip file.")
 
-        def run(progress) -> dict[str, Any]:
+        def run(progress, cancelled) -> dict[str, Any]:
             job_conn = db.connect(database_file)
             try:
                 report = importer.import_source(
@@ -146,12 +170,13 @@ def create_app(
                     project_id,
                     source,
                     progress=lambda done, total, partial: progress(done, total, partial.to_dict()),
+                    cancelled=cancelled,
                 )
                 return report.to_dict()
             finally:
                 job_conn.close()
 
-        return {"job_id": jobs.submit(run, kind="import")}
+        return {"job_id": jobs.submit(run, kind="import", project_id=project_id)}
 
     @app.get("/api/jobs/{job_id}")
     def get_job(job_id: str) -> dict[str, Any]:
@@ -160,22 +185,33 @@ def create_app(
             raise HTTPException(404, "Job not found.")
         return job
 
+    @app.post("/api/jobs/{job_id}/cancel", status_code=202)
+    def cancel_job(job_id: str) -> dict[str, bool]:
+        if jobs.get(job_id) is None:
+            raise HTTPException(404, "Job not found.")
+        # False means it had already finished, which is fine from the caller's point of view.
+        return {"cancel_requested": jobs.cancel(job_id)}
+
     @app.websocket("/api/jobs/{job_id}/ws")
     async def job_progress(websocket: WebSocket, job_id: str) -> None:
         await websocket.accept()
+        poll = config["app"]["job_poll_interval_s"]
         last: dict[str, Any] | None = None
-        while True:
-            job = jobs.get(job_id)
-            if job is None:
-                await websocket.close(code=4404, reason="Job not found")
-                return
-            if job != last:
-                await websocket.send_json(job)
-                last = job
-            if job["state"] in ("done", "failed"):
-                await websocket.close()
-                return
-            await asyncio.sleep(0.2)
+        try:
+            while True:
+                job = jobs.get(job_id)
+                if job is None:
+                    await websocket.close(code=4404, reason="Job not found")
+                    return
+                if job != last:
+                    await websocket.send_json(job)
+                    last = job
+                if job["state"] in ("done", "failed"):
+                    await websocket.close()
+                    return
+                await asyncio.sleep(poll)
+        except WebSocketDisconnect:
+            return  # the browser went away (tab closed or hidden); nothing to clean up
 
     @app.get("/api/projects/{project_id}/batches")
     def list_batches(project_id: int, conn: sqlite3.Connection = Conn) -> list[dict[str, Any]]:

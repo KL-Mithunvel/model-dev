@@ -1,33 +1,9 @@
-import time
-
 import pytest
-from conftest import make_image
+from conftest import make_image, wait_for_job
 from fastapi.testclient import TestClient
 
 from studio import paths
 from studio.api.app import create_app
-
-
-@pytest.fixture
-def client(config):
-    app = create_app(config, allowed_hosts=["testserver"])
-    with TestClient(app) as test_client:
-        yield test_client
-
-
-@pytest.fixture
-def project(client):
-    return client.post("/api/projects", json={"name": "Demo"}).json()
-
-
-def wait_for_job(client, job_id, timeout=20.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        job = client.get(f"/api/jobs/{job_id}").json()
-        if job["state"] in ("done", "failed"):
-            return job
-        time.sleep(0.05)
-    raise AssertionError("job did not finish")
 
 
 def import_images(client, project_id, folder, count, start=0):

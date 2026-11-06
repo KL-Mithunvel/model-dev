@@ -7,7 +7,7 @@ write commit before returning.
 import json
 import shutil
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
 from studio import paths, splits
@@ -15,6 +15,19 @@ from studio.db import utc_now
 
 UNASSIGNED = "unassigned"
 SPLIT_FILTERS = (*splits.SPLIT_NAMES, UNASSIGNED)
+# SQLite refuses statements with too many bound variables (32,766 on current builds); lists of
+# ids are processed in slices of this size. An implementation limit, not a user setting.
+SQL_CHUNK = 500
+
+
+def _chunks(items: list[Any], size: int) -> Iterator[list[Any]]:
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
+
+def normalise_tag(tag: str) -> str:
+    """The one tag normalisation used for storing and for filtering."""
+    return " ".join(tag.split()).lower()
 
 
 class ProjectExists(Exception):
@@ -43,7 +56,7 @@ def clean_tags(tags: Sequence[str], max_length: int, max_count: int) -> list[str
     """
     result: list[str] = []
     for raw in tags:
-        tag = " ".join(raw.split()).lower()
+        tag = normalise_tag(raw)
         if not tag:
             raise ValueError("Tags cannot be empty.")
         if len(tag) > max_length:
@@ -168,7 +181,7 @@ def list_images(
             args.append(split)
     if tag:
         where.append("EXISTS (SELECT 1 FROM image_tags t WHERE t.image_id = i.id AND t.tag = ?)")
-        args.append(tag.strip().lower())
+        args.append(normalise_tag(tag))
     if batch_id is not None:
         where.append("i.batch_id = ?")
         args.append(batch_id)
@@ -223,15 +236,16 @@ def set_split(
     """
     if split is not None and split not in splits.SPLIT_NAMES:
         raise ValueError(f"split must be one of {list(splits.SPLIT_NAMES)} or null")
-    if not image_ids:
-        return 0
-    marks = ",".join("?" * len(image_ids))
-    cursor = conn.execute(
-        f"UPDATE images SET split = ? WHERE project_id = ? AND id IN ({marks})",
-        [split, project_id, *image_ids],
-    )
+    changed = 0
+    for chunk in _chunks(list(image_ids), SQL_CHUNK):  # stay under SQLite's bound-variable limit
+        marks = ",".join("?" * len(chunk))
+        cursor = conn.execute(
+            f"UPDATE images SET split = ? WHERE project_id = ? AND id IN ({marks})",
+            [split, project_id, *chunk],
+        )
+        changed += cursor.rowcount
     conn.commit()
-    return cursor.rowcount
+    return changed
 
 
 def apply_splits(

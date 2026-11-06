@@ -18,6 +18,7 @@ database:
 importing:                 # provisional limits
   max_zip_uncompressed_gb: 20   # refuse zips that would expand beyond this (zip-bomb guard)
   progress_every: 10            # report progress after this many files
+  max_problems_recorded: 500    # per batch; counts stay exact, only the detail list is capped
 
 gallery:
   default_page_size: 60

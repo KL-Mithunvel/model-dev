@@ -20,7 +20,7 @@ Status: **plan approved in outline 2026-11-06; no application code written yet.*
 | Sharing | Remote training workers on the owner's other machines |
 | UX | Apple HIG principles — see `docs/UX.md` |
 | Roboflow study | Clean-room: public docs, API reference, open-source repos, own-account behaviour. See `docs/REA.md` |
-| Multi-agent process | Deferred; to be agreed in detail before Stage 1 code starts |
+| Multi-agent process | Agreed 2026-11-06 — `docs/AGENTS.md` |
 | Licence | Core under a permissive licence (to be chosen in Stage 9). YOLO plugin kept separate |
 
 ## 2. Target machine (survey 2026-11-06)
@@ -53,7 +53,7 @@ No code covered by a gate is written until the gate is cleared.
 - Small tagged versions, one deliverable each (`v0.0` … `v1.0`). A version is tagged only when its tests pass and its docs are updated in the same commit.
 - Commit at each good step (owner request: do not lose progress). Commit messages: imperative, ≤ 72 chars, with the `Co-authored-by` trailers.
 - Each stage's **success criteria** include tests (`pytest`) and **UX criteria** (the checklist in `docs/UX.md`).
-- Multi-agent roles, worktrees and merge rules: to be agreed before Stage 1. Until then one agent works sequentially.
+- Multi-agent roles, worktrees, QA gate and merge rules: agreed 2026-11-06, see `docs/AGENTS.md`. Default is builder + independent reviewer; owner approves each stage plan and every tag.
 
 ## 6. Stages
 
@@ -145,5 +145,5 @@ Goal: train from a dataset version and supervise it.
 - Worker machines: OS, GPU, network (G3).
 - Which export targets are actually needed first.
 - Project name and final licence.
-- Multi-agent roles and merge rules (owner wants a detailed discussion before Stage 1).
+- ~~Multi-agent roles and merge rules~~ — resolved, `docs/AGENTS.md`.
 - Accent colour / density preference for the UI.

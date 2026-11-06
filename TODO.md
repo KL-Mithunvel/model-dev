@@ -21,7 +21,8 @@
 ## Not Started
 - [x] ~~Write the multi-stage plan~~ — DONE: `docs/PLAN.md` (3c1a6a3). Multi-agent part deferred (see below).
 - [x] ~~Decide where the app lives~~ — DECIDED: on `main`, no new repo; Branch Policy updated.
-- [ ] Discuss and agree the multi-agent process (roles, worktrees, merge rules) in detail before Stage 1 code.
+- [x] Multi-agent process agreed and written — `docs/AGENTS.md` (2026-11-06).
+- [ ] Draft the Stage 1 (v0.1) plan for owner approval: files, steps, tests, UX criteria, agent model (A).
 - [x] G1: wrote `docs/FEATURES.md` and `docs/FORMATS.md` (2026-11-06). Cleared for planning.
 - [ ] Before Stage 3: verify every `[U]` (unverified) line in `docs/FORMATS.md` (COCO spec, CVAT XML, Label Studio polygon/keypoint, licences) and add golden sample files under `tests/data/formats/`.
 - [x] G2: venv, pinned `requirements.txt`, `config.yaml`, `.env.example`, `pyproject.toml`, pytest + ruff, `studio/config.py`; CUDA torch 2.14.1+cu130 verified on Python 3.13.7 (GPU matmul OK). 6 tests pass, lint clean (2026-11-06).

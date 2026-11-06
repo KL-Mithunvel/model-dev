@@ -174,7 +174,7 @@ Referenced by number in TODO items and commit messages.
 7. **Hardware is read at runtime.** Never hard-code GPU, VRAM or core counts; every tunable lives in `config.yaml`.
 8. **Every hardware sampler and ML backend has a fake** that runs on any machine, so tests do not need a GPU.
 9. **Small tagged versions.** A version is tagged only with passing tests and docs updated in the same commit. Commit at each good step.
-10. **Multi-agent process is undecided.** Do not spawn roles/worktrees until the owner and Claude agree on it (planned discussion before Stage 1).
+10. **Multi-agent process:** follow `docs/AGENTS.md` (builder + independent reviewer by default; crew only where contracts allow; owner approves each stage plan and every tag).
 
 ---
 
@@ -194,4 +194,4 @@ See `CLAUDE-COMMON.md` → Standard User Rules and `PROJ_STARTER.md` for the ful
 
 ### Project-Specific Overrides
 
-_None — add below as needed._
+- **"Explain before acting" (PROJ_STARTER) is scoped per stage plan** *(owner decision, 2026-11-06)*: for this project, the owner approves each stage plan (files and steps). Inside the approved scope, agents may edit, test and commit without asking again. Anything outside the scope — and always `git push`, version tags, deleting user data, installing system software, or anything outside the repo — still requires explicit approval. Details in `docs/AGENTS.md`.

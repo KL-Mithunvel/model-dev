@@ -23,6 +23,7 @@
 - Added `requirements.txt` (pinned), `config.yaml`, `.env.example`, `pyproject.toml` (pytest, ruff), `studio/__init__.py`, `studio/config.py`, `tests/test_smoke.py`. `ruff` flagged E501 in the template's `tools/compute_survey.py`; exempted that one file instead of reformatting it. `python -m pytest`: 6 passed.
 - G3 (worker machines and export targets) is still open; it does not block this skeleton but blocks Stage 6–8 design.
 - Owner asked to tag `v0.0` while G3 was unanswered: tagged anyway, with G3 recorded as deferred by the owner (PLAN.md Stage 0.4, TODO). Then opened the multi-agent process discussion.
+- Multi-agent discussion (5 questions) resolved: builder + independent reviewer by default, crew only with written contracts; auto-merge after QA, owner approves every tag; role cards + contracts in `docs/`; owner approves each stage plan, agents autonomous inside it. Wrote `docs/AGENTS.md`; updated Rule 10 and added a Project-Specific Override in `.CLAUDE/CLAUDE.md` (generic `PROJ_STARTER.md` left untouched), `docs/PLAN.md`, index and TODO.
 - Owner message ".+3" arrived mid-session and was unintelligible; asked for a resend. Not acted on.
 - Compute survey, full laptop: Dell Precision 3591, Core Ultra 7 155H (16C/22T), 31.5 GB RAM, RTX 1000 Ada 6 GB, Intel Arc iGPU, 410 GB free disk, Python 3.13.7, torch not installed.
 

@@ -22,6 +22,7 @@
 - Stage 0.3 / Gate G2 cleared: created `venv/`; installed `torch==2.14.1+cu130` and `torchvision==0.29.1+cu130` from the PyTorch cu130 index (cu128 tops out at 2.11, cu130 has the newest builds for Python 3.13). `torch.cuda.is_available()` is True on the RTX 1000 Ada (6140 MB); a 1024×1024 CUDA matmul ran. No fallback to Python 3.12 was needed. Survey re-run inside the venv shows CUDA available.
 - Added `requirements.txt` (pinned), `config.yaml`, `.env.example`, `pyproject.toml` (pytest, ruff), `studio/__init__.py`, `studio/config.py`, `tests/test_smoke.py`. `ruff` flagged E501 in the template's `tools/compute_survey.py`; exempted that one file instead of reformatting it. `python -m pytest`: 6 passed.
 - G3 (worker machines and export targets) is still open; it does not block this skeleton but blocks Stage 6–8 design.
+- Owner asked to tag `v0.0` while G3 was unanswered: tagged anyway, with G3 recorded as deferred by the owner (PLAN.md Stage 0.4, TODO). Then opened the multi-agent process discussion.
 - Owner message ".+3" arrived mid-session and was unintelligible; asked for a resend. Not acted on.
 - Compute survey, full laptop: Dell Precision 3591, Core Ultra 7 155H (16C/22T), 31.5 GB RAM, RTX 1000 Ada 6 GB, Intel Arc iGPU, 410 GB free disk, Python 3.13.7, torch not installed.
 

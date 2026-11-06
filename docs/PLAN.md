@@ -66,7 +66,7 @@ Goal: a clean, documented base and cleared gates.
   Files: `config.yaml`, `requirements.txt`, `.env.example`, `tests/test_smoke.py`, `pyproject.toml`.
   Success: `pytest` passes; `python tools/compute_survey.py` shows torch + CUDA.
 - **0.4 Where it runs (G3)** — Ask the owner about worker machines and export targets; record answers.
-  Tag `v0.0` when all three gates are cleared.
+  `v0.0` was tagged 2026-11-06 with G1 and G2 cleared and **G3 deferred by the owner**. G3 must be answered before Stage 6 (training backends/export) and Stage 8 (workers) design starts.
 
 ### Stage 1 — Data core and app shell (v0.1)
 Goal: create a project, import images, see them in a gallery.

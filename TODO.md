@@ -25,7 +25,8 @@
 - [x] G1: wrote `docs/FEATURES.md` and `docs/FORMATS.md` (2026-11-06). Cleared for planning.
 - [ ] Before Stage 3: verify every `[U]` (unverified) line in `docs/FORMATS.md` (COCO spec, CVAT XML, Label Studio polygon/keypoint, licences) and add golden sample files under `tests/data/formats/`.
 - [x] G2: venv, pinned `requirements.txt`, `config.yaml`, `.env.example`, `pyproject.toml`, pytest + ruff, `studio/config.py`; CUDA torch 2.14.1+cu130 verified on Python 3.13.7 (GPU matmul OK). 6 tests pass, lint clean (2026-11-06).
-- [ ] G3: owner to confirm worker machines (OS, GPU, network) and needed export targets.
+- [ ] G3 (DEFERRED by owner at v0.0): owner to confirm worker machines (OS, GPU, network, offline?) and priority export target. Must be answered before Stage 6 and Stage 8 design.
+- [x] Tagged `v0.0` (2026-11-06).
 - [ ] Owner to read Roboflow's Terms of Service before further study.
 - [ ] Choose project name, accent colour/density, and final licence.
 - [x] Node upgraded to 26.13.0, REA 6.8.0 installed and registered with Claude Code only (see `docs/REA.md`). Owner: restart Claude Code to load it.

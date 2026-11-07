@@ -1,17 +1,20 @@
 // Project gallery: thumbnails, filters, selection, inspector (split + tags), import, auto-split.
 import { api, watchJob } from "../api.js";
 import { limits } from "../limits.js";
+import { openClassManager } from "../classes.js";
 import { el, formatBytes, formatDate, icon, isTyping, openDialog, plural, toast } from "../ui.js";
 
 const SPLITS = ["train", "val", "test"];
 const SPLIT_LABEL = { train: "Train", val: "Validation", test: "Test" };
 
-export async function mount(container, { setToolbar, projectId }) {
+export async function mount(container, { setToolbar, navigate, projectId }) {
   const state = {
     project: null,
     items: [],
     total: 0,
-    filters: { split: "", tag: "", q: "" },
+    filters: { split: "", tag: "", q: "", labelled: "", class_id: "" },
+    classes: [],
+    stats: null,
     selection: new Set(),
     anchor: null,
     focusIndex: 0,
@@ -36,6 +39,8 @@ export async function mount(container, { setToolbar, projectId }) {
   async function loadProject() {
     state.project = await api(`/api/projects/${projectId}`);
     state.tags = await api(`/api/projects/${projectId}/tags`);
+    state.classes = await api(`/api/projects/${projectId}/classes`);
+    state.stats = await api(`/api/projects/${projectId}/annotation-stats`);
   }
 
   function query(offset) {
@@ -93,33 +98,50 @@ export async function mount(container, { setToolbar, projectId }) {
     return state.items.filter((item) => state.selection.has(item.id));
   }
 
+  let clearButton = null;
+  function syncClear() {
+    if (clearButton) clearButton.hidden = !Object.values(state.filters).some(Boolean);
+  }
+
   function renderFilters() {
-    const splitSelect = el("select", { class: "input", id: "f-split", "aria-label": "Filter by split", onchange: (e) => { state.filters.split = e.target.value; loadPage(true); } },
+    const splitSelect = el("select", { class: "input", id: "f-split", "aria-label": "Filter by split", onchange: (e) => { state.filters.split = e.target.value; syncClear(); loadPage(true); } },
       el("option", { value: "", text: "All splits" }),
       ...[...SPLITS, "unassigned"].map((s) => el("option", { value: s, text: s === "unassigned" ? "No split" : SPLIT_LABEL[s], selected: state.filters.split === s })),
     );
-    const tagSelect = el("select", { class: "input", id: "f-tag", "aria-label": "Filter by tag", onchange: (e) => { state.filters.tag = e.target.value; loadPage(true); } },
+    const tagSelect = el("select", { class: "input", id: "f-tag", "aria-label": "Filter by tag", onchange: (e) => { state.filters.tag = e.target.value; syncClear(); loadPage(true); } },
       el("option", { value: "", text: "All tags" }),
       ...state.tags.map((t) => el("option", { value: t.tag, text: `${t.tag} (${t.count})`, selected: state.filters.tag === t.tag })),
+    );
+    const labelledSelect = el("select", { class: "input", id: "f-labelled", "aria-label": "Filter by labelling", onchange: (e) => { state.filters.labelled = e.target.value; syncClear(); loadPage(true); } },
+      el("option", { value: "", text: "Labelled or not" }),
+      el("option", { value: "true", text: "Labelled", selected: state.filters.labelled === "true" }),
+      el("option", { value: "false", text: "Not labelled yet", selected: state.filters.labelled === "false" }),
+    );
+    const classSelect = el("select", { class: "input", id: "f-class", "aria-label": "Filter by class", onchange: (e) => { state.filters.class_id = e.target.value; syncClear(); loadPage(true); } },
+      el("option", { value: "", text: "All classes" }),
+      ...state.classes.map((c) => el("option", { value: String(c.id), text: c.name, selected: state.filters.class_id === String(c.id) })),
     );
     let timer = null;
     const search = el("input", {
       class: "input search", id: "f-search", type: "search", placeholder: "Search file names", "aria-label": "Search file names", value: state.filters.q,
       oninput: (e) => {
         clearTimeout(timer);
-        timer = setTimeout(() => { state.filters.q = e.target.value.trim(); loadPage(true); }, 250);
+        timer = setTimeout(() => { state.filters.q = e.target.value.trim(); syncClear(); loadPage(true); }, 250);
       },
     });
-    const active = Object.values(state.filters).some(Boolean);
+    // One persistent button whose visibility follows the filters (rebuilding the bar on every
+    // change would drop keyboard focus from the control the user is using).
+    clearButton = el("button", { class: "btn btn-quiet", type: "button", text: "Clear filters", onclick: clearFilters });
+    syncClear();
     filtersBar.replaceChildren(
-      splitSelect, tagSelect, search,
-      ...(active ? [el("button", { class: "btn btn-quiet", type: "button", text: "Clear filters", onclick: clearFilters })] : []),
+      splitSelect, tagSelect, labelledSelect, classSelect, search,
+      clearButton,
       el("span", { class: "muted num", id: "summary", role: "status" }),
     );
   }
 
   function clearFilters() {
-    state.filters = { split: "", tag: "", q: "" };
+    state.filters = { split: "", tag: "", q: "", labelled: "", class_id: "" };
     renderFilters();
     loadPage(true);
   }
@@ -128,13 +150,24 @@ export async function mount(container, { setToolbar, projectId }) {
     const node = document.getElementById("summary");
     if (!node) return;
     const sel = state.selection.size ? ` · ${state.selection.size.toLocaleString()} selected` : "";
-    node.textContent = `${state.items.length.toLocaleString()} of ${state.total.toLocaleString()} shown${sel}`;
+    const progress = state.stats ? ` · ${state.stats.labelled.toLocaleString()} of ${state.stats.images.toLocaleString()} labelled` : "";
+    node.textContent = `${state.items.length.toLocaleString()} of ${state.total.toLocaleString()} shown${sel}${progress}`;
   }
 
   function tileLabel(item) {
     const parts = [item.original_name, item.split ? `${SPLIT_LABEL[item.split]} split` : "no split"];
     if (item.tags.length) parts.push(`tags: ${item.tags.join(", ")}`);
+    if (item.annotation_count) parts.push(`${item.annotation_count} annotation${item.annotation_count === 1 ? "" : "s"}`);
+    else if (item.marked_empty) parts.push("marked as no objects");
+    const label = state.classes.find((c) => c.id === item.label_class_id);
+    if (label) parts.push(`labelled ${label.name}`);
     return parts.join(", ");
+  }
+
+  function annotationBadge(item) {
+    const label = state.classes.find((c) => c.id === item.label_class_id);
+    const text = item.annotation_count ? String(item.annotation_count) : item.marked_empty ? "empty" : label ? label.name : null;
+    return text === null ? null : el("span", { class: "badge badge-right" }, icon("box"), text);
   }
 
   function renderTile(item, index) {
@@ -148,6 +181,7 @@ export async function mount(container, { setToolbar, projectId }) {
       el("img", { src: item.thumb_url, alt: "", loading: "lazy", draggable: "false" }),
       el("span", { class: "name", text: item.original_name }),
       item.split ? el("span", { class: "badge" }, el("i", { class: `dot ${item.split}` }), SPLIT_LABEL[item.split]) : null,
+      annotationBadge(item),
     );
     return tile;
   }
@@ -307,6 +341,7 @@ export async function mount(container, { setToolbar, projectId }) {
         // width/height reserve the preview's space before it loads, so the controls below it do not jump
         el("img", { src: item.file_url, alt: `Preview of ${item.original_name}`, width: String(item.width), height: String(item.height) }),
         el("h3", { text: item.original_name }),
+        el("button", { class: "btn btn-primary", type: "button", onclick: () => navigate(`/projects/${projectId}/annotate/${item.id}`) }, icon("box"), "Annotate this image"),
         el("dl", { class: "kv num" },
           el("dt", { text: "Size" }), el("dd", { text: `${item.width} × ${item.height} px` }),
           el("dt", { text: "File" }), el("dd", { text: formatBytes(item.bytes) }),
@@ -372,6 +407,10 @@ export async function mount(container, { setToolbar, projectId }) {
     return Math.max(1, count);
   }
 
+  grid.addEventListener("dblclick", (event) => {
+    const tile = event.target.closest(".tile");
+    if (tile) navigate(`/projects/${projectId}/annotate/${tile.dataset.id}`);
+  });
   grid.addEventListener("click", (event) => {
     const tile = event.target.closest(".tile");
     if (!tile) return;
@@ -584,6 +623,24 @@ export async function mount(container, { setToolbar, projectId }) {
     await loadPage(true);
   }
 
+  // ---- annotate and classes --------------------------------------------------------------
+  async function startAnnotating() {
+    try {
+      let page = await api(`/api/projects/${projectId}/images?labelled=false&limit=1`);
+      if (!page.items.length) page = await api(`/api/projects/${projectId}/images?limit=1`);
+      if (!page.items.length) { toast("Import some images first."); return; }
+      navigate(`/projects/${projectId}/annotate/${page.items[0].id}`);
+    } catch (error) {
+      toast(error.message, { error: true });
+    }
+  }
+  function openClasses() {
+    openClassManager({
+      projectId,
+      onChanged: async () => { await loadProject(); renderFilters(); await loadPage(true); },
+    });
+  }
+
   // ---- start -----------------------------------------------------------------------------
   const cleanup = () => {
     document.removeEventListener("keydown", onKey);
@@ -603,9 +660,13 @@ export async function mount(container, { setToolbar, projectId }) {
     actions: [
       el("a", { class: "btn btn-quiet", href: "#/projects" }, icon("back"), "Projects"),
       el("button", { class: "btn", type: "button", onclick: openAutoSplit }, icon("shuffle"), "Split…"),
-      el("button", { class: "btn btn-primary", type: "button", onclick: openImport }, icon("upload"), "Import images"),
+      el("button", { class: "btn", type: "button", onclick: openClasses }, "Classes…"),
+      el("button", { class: "btn", type: "button", onclick: openImport }, icon("upload"), "Import images"),
+      el("button", { class: "btn btn-primary", type: "button", onclick: startAnnotating }, icon("box"), "Annotate"),
     ],
     commands: [
+      { label: "Annotate (next unlabelled image)", hint: "", run: startAnnotating },
+      { label: "Manage classes", hint: "", run: openClasses },
       { label: "Import images", hint: "", run: openImport },
       { label: "Split images into train / val / test", hint: "", run: openAutoSplit },
       { label: "Select all loaded images", hint: "Ctrl A", run: selectAllLoaded },

@@ -1,9 +1,10 @@
 // Thin client for the local API. Errors become Error objects with a readable message.
 
 export class ApiError extends Error {
-  constructor(message, status) {
+  constructor(message, status, data = null) {
     super(message);
     this.status = status;
+    this.data = data; // the parsed error body, e.g. { detail, current_rev, in_use }
   }
 }
 
@@ -31,7 +32,7 @@ export async function api(path, { method = "GET", body } = {}) {
   } catch {
     /* non-JSON body */
   }
-  if (!response.ok) throw new ApiError(readableDetail(data?.detail, response.status), response.status);
+  if (!response.ok) throw new ApiError(readableDetail(data?.detail, response.status), response.status, data);
   return data;
 }
 

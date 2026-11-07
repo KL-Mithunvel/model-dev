@@ -32,6 +32,18 @@ const ICONS = {
   keyboard: "M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M7 14h10",
   x: "M6 6l12 12M18 6 6 18",
   image: "M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M9 9h.01",
+  cursor: "M5 3l14 7-6 2-2 6z",
+  box: "M4 5h16v14H4z",
+  move: "M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3",
+  undo: "M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3",
+  redo: "M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3",
+  "zoom-in": "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-4.5-4.5M11 8v6M8 11h6",
+  "zoom-out": "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-4.5-4.5M8 11h6",
+  fit: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
+  next: "M9 5l7 7-7 7",
+  check: "M5 12l5 5 9-10",
+  edit: "M4 20h4L19 9l-4-4L4 16zM14 6l4 4",
+  copy: "M8 8h12v12H8zM4 16V4h12",
 };
 
 export function icon(name) {
@@ -77,6 +89,7 @@ export function toast(message, { error = false, actionLabel = null, onAction = n
     );
   }
   host.append(node);
+  while (host.children.length > 3) host.firstElementChild.remove(); // never let toasts pile up over the page
   if (!error) setTimeout(() => node.remove(), 5000); // errors stay until the next action replaces them
   else node.addEventListener("click", () => node.remove());
   return node;

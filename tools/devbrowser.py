@@ -363,7 +363,10 @@ class Session:
                 self.problems.append("exception: " + str(text)[:300])
             elif kind == "Log.entryAdded" and message["params"]["entry"]["level"] == "error":
                 entry = message["params"]["entry"]
-                self.problems.append("console: " + entry["text"] + " " + entry.get("url", ""))
+                # 409 is part of the API contract (save conflict, "class is in use"); the browser
+                # logs it as an error but the app handles it, so it is not a problem.
+                if "status of 409" not in entry["text"]:
+                    self.problems.append("console: " + entry["text"] + " " + entry.get("url", ""))
             if message.get("id") == mid:
                 if "error" in message:
                     raise DevRunError(f"{method} failed: {message['error']}")
@@ -551,7 +554,9 @@ class Session:
 
     def summary(self) -> bool:
         if self.problems:
-            self.check("no JavaScript or console errors during the run", False, "; ".join(self.problems)[:300])
+            self.check("no JavaScript or console errors during the run", False, f"{len(self.problems)} problem(s), listed below")
+            for problem in self.problems:
+                print("    - " + problem[:400])
         else:
             self.check("no JavaScript or console errors during the run", True)
         failed = [name for name, ok in self.results if not ok]

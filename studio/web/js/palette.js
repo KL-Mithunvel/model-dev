@@ -13,14 +13,37 @@ export const SHORTCUTS = [
   ["Focus search", ["/"]],
 ];
 
+export const ANNOTATOR_SHORTCUTS = [
+  ["Select / Box / Pan tool", ["V", "B", "H"]],
+  ["Pan with the mouse", ["Space", "drag"]],
+  ["Zoom / fit", ["scroll", "0"]],
+  ["Previous / next image", ["A", "D"]],
+  ["Next unlabelled image", ["N"]],
+  ["Mark as no objects", ["E"]],
+  ["Choose class (or change the selection's class)", ["1", "...", "9"]],
+  ["Set the image label", ["Shift", "1...9"]],
+  ["Move selection (x10 with Shift)", ["Left", "Up", "Right", "Down"]],
+  ["Resize selection", ["Alt", "arrows"]],
+  ["Drop a default box in the box tool", ["Enter"]],
+  ["Next / previous annotation", ["Tab", "Shift+Tab"]],
+  ["Duplicate / delete selection", ["Ctrl+D", "Delete"]],
+  ["Undo / redo", ["Ctrl+Z", "Ctrl+Shift+Z"]],
+  ["Cancel / deselect", ["Esc"]],
+];
+
 export function showShortcuts() {
   const grid = el("div", { class: "shortcuts" });
-  for (const [label, keys] of SHORTCUTS) {
-    grid.append(
-      el("span", { text: label }),
-      el("span", {}, keys.map((key) => el("kbd", { text: key }))),
-    );
-  }
+  const section = (title, rows) => {
+    grid.append(el("h3", { class: "shortcuts-head", text: title }));
+    for (const [label, keys] of rows) {
+      grid.append(
+        el("span", { text: label }),
+        el("span", {}, keys.map((key) => el("kbd", { text: key }))),
+      );
+    }
+  };
+  section("Everywhere and in the gallery", SHORTCUTS);
+  section("In the annotator", ANNOTATOR_SHORTCUTS);
   openDialog({
     title: "Keyboard shortcuts",
     body: grid,

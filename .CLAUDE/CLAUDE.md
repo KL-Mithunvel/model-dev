@@ -98,6 +98,7 @@ python tools\compute_survey.py      # CPU / RAM / disk / GPU survey
 ```powershell
 python tools\dev_run.py list                       # scenarios in tools\scenarios\
 python tools\dev_run.py run smoke                  # VISIBLE Edge window, watchable pace (default)
+python tools\dev_run.py run annotate_flow --headless   # also: annotate, annotate_gallery, annotate_perf
 python tools\dev_run.py run smoke --headless       # no window, full speed (quick checks / CI-style)
 python tools\dev_run.py run tour --pace 1.5        # narrated demo, slower
 python tools\dev_run.py open                       # app + demo data + browser for YOU; Ctrl+C stops all
@@ -121,7 +122,7 @@ Keep the server bound to `127.0.0.1`: it reads the folders you name in the impor
 
 ## Architecture
 
-Status: **v0.1** (data core + app shell). Later stages: `docs/PLAN.md`.
+Status: **v0.2 in review** (v0.1 + annotation backend and the box/classification annotator). Later stages: `docs/PLAN.md`.
 
 | Path | Role |
 |------|------|
@@ -138,7 +139,8 @@ Status: **v0.1** (data core + app shell). Later stages: `docs/PLAN.md`.
 | `studio/api/app.py` | FastAPI app factory `create_app`; serves `studio/web/` |
 | `studio/__main__.py` | `python -m studio` launcher |
 | `tools/dev_run.py`, `tools/devbrowser.py`, `tools/scenarios/` | Dev tool: run the app in a real browser and drive/test it (see Running the System) |
-| `studio/web/` | Vanilla-JS UI: `css/tokens.css` (design tokens), `css/app.css`, `js/{main,ui,api,palette,limits}.js`, `js/views/{projects,gallery}.js` |
+| `studio/web/` | Vanilla-JS UI: `css/{tokens,app,annotator}.css`; shell `js/{main,ui,api,palette,limits,classes}.js`; views `js/views/{projects,gallery,annotate}.js` |
+| `studio/web/js/{geometry,history,editor,saver}.js` | **Pure, unit-tested** annotator logic (no DOM): box/zoom math, undo history of frozen snapshots, immutable editing operations, autosave (debounce, local draft, retry, conflicts). Tests: `tests/js/*.test.mjs`, run by `node --test tests/js` and by `pytest` (`tests/test_js_units.py`) |
 
 ```
 Browser (studio/web) --HTTP/WebSocket--> FastAPI (api/app.py) --> repo.py --> SQLite (data/studio.sqlite)
@@ -159,7 +161,8 @@ Browser (studio/web) --HTTP/WebSocket--> FastAPI (api/app.py) --> repo.py --> SQ
 - **`api.app.create_app(config=None, allowed_hosts=None)`** — routes are listed in `/docs` when running. Errors are `{"detail": "<readable message>"}`.
 - **`jobs.JobManager(keep_finished)`** — `submit(fn, kind, project_id=None) -> job_id` where `fn(progress, cancelled)`; `get`, `cancel(job_id)`, `has_active(project_id)`; a failing job never kills the worker; finished jobs are pruned. `POST /api/jobs/{id}/cancel` asks an import to stop before its next file; what was imported is kept and the report has `cancelled: true`. A project cannot be deleted while it has an active import (409).
 - **Import robustness** — a bad zip member (clash, duplicate name, too long, encrypted) is reported and skipped; a per-file exception is counted as `corrupt` and the import continues; a database error aborts but the batch row keeps the counts so far; symlinks/junctions are not followed and are reported as ignored. `GET /api/limits` exposes name/tag/page limits so the UI never hard-codes them.
-- **Frontend rule:** all text is inserted via `textContent`/`el()` (never `innerHTML`) because file names come from disk. Never pass `null` to `append`/`replaceChildren` (it prints "null").
+- **Frontend rules:** all text is inserted via `textContent`/`el()` (never `innerHTML`) because file names come from disk. Never pass `null` to `append`/`replaceChildren` (it prints "null"). Never rebuild a control the user is operating without restoring focus (`rebuild()` in `annotate.js` keys elements with `data-fk`). Never open a dialog on pointer-**down** (the release lands on it and steals focus); open it on release. The toast container is click-through (`pointer-events: none`) so it can never block the page beneath it; at most 3 toasts are shown.
+- **Annotator saving:** every edit writes a synchronous `localStorage` draft (`studio.draft.<imageId>`) and schedules a debounced replace-all `PUT` with the revision; the draft is removed after a successful save and offered back ("Restore") if the tab died first; a `pagehide` `keepalive` request sends anything still pending; a revision conflict (409) shows a banner with "Load the latest" / "Keep my version".
 
 ---
 

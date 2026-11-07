@@ -72,6 +72,7 @@ function globalCommands() {
 const routes = [
   { pattern: /^\/projects$/, load: () => import("./views/projects.js"), params: () => ({}) },
   { pattern: /^\/projects\/(\d+)$/, load: () => import("./views/gallery.js"), params: (m) => ({ projectId: Number(m[1]) }) },
+  { pattern: /^\/projects\/(\d+)\/annotate\/(\d+)$/, load: () => import("./views/annotate.js"), params: (m) => ({ projectId: Number(m[1]), imageId: Number(m[2]) }) },
 ];
 
 let routeToken = 0; // each navigation gets a number; a slower, older view must not win

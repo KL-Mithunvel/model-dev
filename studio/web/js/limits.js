@@ -3,7 +3,11 @@
 // limits regardless of what the browser allows.
 import { api } from "./api.js";
 
-export let limits = { project_name_max: 80, tag_max_length: 40, tags_per_image: 20, page_size: 60 };
+export let limits = {
+  project_name_max: 80, tag_max_length: 40, tags_per_image: 20, page_size: 60,
+  class_name_max: 80, palette: ["#E69F00", "#56B4E9", "#009E73"], undo_limit: 500,
+  save_debounce_ms: 400, min_box_px: 1, max_annotations: 2000, filmstrip_size: 15,
+};
 
 try {
   limits = await api("/api/limits");

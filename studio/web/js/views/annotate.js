@@ -1,0 +1,722 @@
+// Annotator: draw, edit and label one image.
+// Pure logic lives in geometry.js, editor.js, history.js and saver.js (all unit-tested); this file
+// is the DOM, pointer and keyboard glue around them.
+import { api, ApiError } from "../api.js";
+import { openClassDialog } from "../classes.js";
+import {
+  addBox, appendFromServer, canMarkEmpty, cycle, deleteAnnotations, dropUnknownClasses,
+  duplicateAnnotations, fromServer, makeIdFactory, moveAnnotations, resizeAnnotationsBy,
+  resizeAnnotationTo, setClass, setLabel, setMarkedEmpty, toPayload,
+} from "../editor.js";
+import { HANDLES, boxFromPoints, defaultBox, fitView, handlePoint, panBy, screenToImage, visibleRect, zoomAt } from "../geometry.js";
+import { createHistory } from "../history.js";
+import { limits } from "../limits.js";
+import { clearDraft, createSaver, readDraft } from "../saver.js";
+import { el, icon, isTyping, plural, toast } from "../ui.js";
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const HANDLE_SIZE_PX = 10; // size of a resize handle on screen, whatever the zoom
+const MIN_DRAW_PX = 4; // a drag shorter than this on screen is a click, not a box
+const DRAG_START_PX = 3; // a press must move this far before it moves a shape
+const NUDGE = 1;
+const NUDGE_BIG = 10;
+const CURSORS = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize" };
+const STATUS_TEXT = { saved: "Saved", saving: "Saving…", dirty: "Unsaved changes", error: "Couldn’t save – retrying", conflict: "Changed elsewhere" };
+
+const svgEl = (tag, attrs = {}) => {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+  return node;
+};
+
+function safeStorage() {
+  try {
+    const storage = window.localStorage;
+    storage.setItem("__studio_probe", "1");
+    storage.removeItem("__studio_probe");
+    return storage;
+  } catch {
+    return null; // private mode or blocked: autosave to the server still works
+  }
+}
+
+const isLabelled = (state) => state.annotations.length > 0 || state.marked_empty || state.label_class_id !== null;
+
+export async function mount(container, { setToolbar, navigate, projectId, imageId }) {
+  const storage = safeStorage();
+  const newId = makeIdFactory();
+  const ui = { tool: "select", activeClass: null, selection: new Set(), view: { scale: 1, tx: 0, ty: 0 }, fitted: true, preview: null, draft: null, drag: null, space: false };
+  let image = null;
+  let classes = [];
+  let neighbours = null;
+  let stats = null;
+  let history = null;
+  let saver = null;
+  let initialLabelled = false;
+  let width = 0;
+  let height = 0;
+  const cleanups = [];
+  const listen = (target, type, handler, options) => {
+    target.addEventListener(type, handler, options);
+    cleanups.push(() => target.removeEventListener(type, handler, options));
+  };
+
+  // ---- skeleton ---------------------------------------------------------------------------
+  const toolstrip = el("div", { class: "toolstrip", role: "toolbar", "aria-label": "Tools", "aria-orientation": "vertical" });
+  const viewport = el("div", { class: "viewport" });
+  const stage = el("div", { class: "stage", tabindex: "0", role: "application", "aria-label": "Image canvas. B draws boxes, V selects, H or Space pans, A and D change image. Press ? for all shortcuts." }, viewport);
+  const hud = el("div", { class: "hud", "aria-hidden": "true" });
+  const banner = el("div", { class: "a-banner", role: "status", hidden: true });
+  const live = el("div", { class: "sr-only", role: "status", "aria-live": "polite" });
+  const inspector = el("aside", { class: "a-inspector", "aria-label": "Annotations" });
+  const filmstrip = el("div", { class: "filmstrip", role: "list", "aria-label": "Images" });
+  container.replaceChildren(
+    el("div", { class: "annotator" }, toolstrip, el("div", { class: "stage-wrap" }, banner, stage, hud), inspector, filmstrip, live),
+  );
+  const statusChip = el("span", { class: "chip save-chip", role: "status", "data-status": "saved", text: STATUS_TEXT.saved });
+
+  const announce = (text) => { live.textContent = ""; setTimeout(() => { live.textContent = text; }, 30); };
+  const showBanner = (message, actions = []) => {
+    banner.replaceChildren(el("span", { text: message }), ...actions.map((a) => el("button", { class: "btn", type: "button", text: a.label, onclick: a.onClick })));
+    banner.hidden = false;
+  };
+  const hideBanner = () => { banner.hidden = true; banner.replaceChildren(); };
+
+  // ---- derived values ---------------------------------------------------------------------
+  const current = () => ui.preview ?? history.present;
+  const classById = (id) => classes.find((c) => c.id === id) ?? null;
+  const activeClassId = () => (classById(ui.activeClass) ? ui.activeClass : (classes[0]?.id ?? null));
+  const minBox = () => limits.min_box_px;
+  const stageRect = () => stage.getBoundingClientRect();
+  const stagePoint = (event) => { const r = stageRect(); return { sx: event.clientX - r.left, sy: event.clientY - r.top }; };
+  const imagePoint = (event) => { const s = stagePoint(event); return { ...s, ...screenToImage(ui.view, s.sx, s.sy) }; };
+
+  // ---- loading ----------------------------------------------------------------------------
+  async function loadServerState() {
+    const server = await api(`/api/images/${imageId}/annotations`);
+    history = createHistory(fromServer(server, newId), { limit: limits.undo_limit });
+    const rev = server.rev;
+    if (saver) saver.dispose();
+    saver = createSaver({
+      imageId, rev, storage, debounceMs: limits.save_debounce_ms,
+      onStatus: (status, detail) => {
+        statusChip.textContent = STATUS_TEXT[status] ?? status;
+        statusChip.dataset.status = status;
+        if (status === "conflict") offerConflictChoice(detail);
+      },
+      send: async (payload, sendRev) => {
+        try {
+          const result = await api(`/api/images/${imageId}/annotations`, { method: "PUT", body: { ...payload, rev: sendRev } });
+          return { ok: true, rev: result.rev };
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 409 && error.data?.current_rev !== undefined) {
+            return { conflict: true, currentRev: error.data.current_rev };
+          }
+          throw error;
+        }
+      },
+    });
+    ui.selection.clear();
+    initialLabelled = isLabelled(history.present);
+  }
+
+  async function loadAll() {
+    [image, classes, neighbours, stats] = await Promise.all([
+      api(`/api/images/${imageId}`),
+      api(`/api/projects/${projectId}/classes`),
+      api(`/api/images/${imageId}/neighbours`),
+      api(`/api/projects/${projectId}/annotation-stats`),
+    ]);
+    if (image.project_id !== projectId) throw new ApiError("That image is not in this project.", 404);
+    width = image.width;
+    height = image.height;
+    await loadServerState();
+  }
+
+  try {
+    await loadAll();
+  } catch (error) {
+    container.replaceChildren(
+      el("div", { class: "empty", role: "alert" },
+        el("h3", { text: error.status === 404 ? "Image not found" : "Could not open this image" }),
+        el("p", { text: error.message }),
+        el("a", { class: "btn btn-primary", href: `#/projects/${projectId}`, text: "Back to the gallery" })),
+    );
+    setToolbar({ title: "Image" });
+    return () => {};
+  }
+
+  // ---- image and overlay ------------------------------------------------------------------
+  const photo = el("img", { class: "photo", src: image.file_url, alt: `Image ${image.original_name}`, draggable: "false", width: String(width), height: String(height) });
+  const svg = svgEl("svg", { class: "overlay", viewBox: `0 0 ${width} ${height}`, width, height });
+  viewport.style.width = `${width}px`;
+  viewport.style.height = `${height}px`;
+  viewport.append(photo, svg);
+  photo.decode().then(() => {
+    if (photo.naturalWidth !== width || photo.naturalHeight !== height) {
+      console.error(`Image size mismatch: file is ${photo.naturalWidth}x${photo.naturalHeight}, database says ${width}x${height}`);
+      toast("This image’s size does not match what was imported. Annotations may be misplaced.", { error: true });
+    }
+  }).catch(() => toast("The image could not be displayed.", { error: true }));
+
+  function applyView() {
+    const { scale, tx, ty } = ui.view;
+    viewport.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    renderShapes();
+    updateHud();
+  }
+  function fit() {
+    const r = stageRect();
+    if (r.width < 50 || r.height < 50) return;
+    ui.view = fitView(r.width, r.height, width, height);
+    ui.fitted = true;
+    applyView();
+  }
+  function zoomStep(factor) {
+    const r = stageRect();
+    ui.view = zoomAt(ui.view, factor, r.width / 2, r.height / 2);
+    ui.fitted = false;
+    applyView();
+  }
+  function updateHud(point = null) {
+    const zoom = `${Math.round(ui.view.scale * 100)}%`;
+    hud.textContent = point ? `${zoom} · ${Math.round(point.x)}, ${Math.round(point.y)}` : zoom;
+  }
+  const observer = new ResizeObserver(() => { if (ui.fitted) fit(); });
+  observer.observe(stage);
+  cleanups.push(() => observer.disconnect());
+
+  // ---- rendering --------------------------------------------------------------------------
+  let shapeNodes = new Map(); // annotation id -> { rect, label }
+  let handleNodes = new Map(); // handle name -> rect
+
+  function placeBox(nodes, data, scale) {
+    nodes.rect.setAttribute("x", data.x);
+    nodes.rect.setAttribute("y", data.y);
+    nodes.rect.setAttribute("width", data.w);
+    nodes.rect.setAttribute("height", data.h);
+    nodes.label.setAttribute("x", data.x + 3 / scale);
+    nodes.label.setAttribute("y", data.y + 14 / scale);
+  }
+
+  /** While dragging: move the existing nodes instead of rebuilding all of them (keeps 200+ shapes smooth). */
+  function updateGeometry() {
+    const state = current();
+    const scale = ui.view.scale;
+    for (const a of state.annotations) {
+      const nodes = shapeNodes.get(a.id);
+      if (nodes && a.kind === "box") placeBox(nodes, a.data, scale);
+    }
+    const chosen = state.annotations.filter((a) => ui.selection.has(a.id) && a.kind === "box");
+    if (chosen.length === 1) {
+      const size = HANDLE_SIZE_PX / scale;
+      for (const [handle, node] of handleNodes) {
+        const p = handlePoint(chosen[0].data, handle);
+        node.setAttribute("x", p.x - size / 2);
+        node.setAttribute("y", p.y - size / 2);
+      }
+    }
+  }
+
+  function renderShapes() {
+    const state = current();
+    const scale = ui.view.scale;
+    shapeNodes = new Map();
+    handleNodes = new Map();
+    svg.replaceChildren();
+    for (const a of state.annotations) {
+      if (a.kind !== "box") continue;
+      const color = classById(a.class_id)?.color ?? "#999999";
+      const selected = ui.selection.has(a.id);
+      const group = svgEl("g", { class: `shape${selected ? " selected" : ""}`, "data-id": a.id });
+      const rect = svgEl("rect", { x: a.data.x, y: a.data.y, width: a.data.w, height: a.data.h, fill: color, "fill-opacity": selected ? 0.3 : 0.14, stroke: color, "stroke-width": selected ? 3 : 2, "vector-effect": "non-scaling-stroke" });
+      const label = svgEl("text", { x: a.data.x + 3 / scale, y: a.data.y + 14 / scale, "font-size": 12 / scale });
+      label.textContent = classById(a.class_id)?.name ?? "?";
+      group.append(rect, label);
+      svg.append(group);
+      shapeNodes.set(a.id, { rect, label });
+    }
+    const chosen = state.annotations.filter((a) => ui.selection.has(a.id) && a.kind === "box");
+    if (chosen.length === 1) {
+      const a = chosen[0];
+      const size = HANDLE_SIZE_PX / scale;
+      for (const handle of HANDLES) {
+        const p = handlePoint(a.data, handle);
+        const node = svgEl("rect", { x: p.x - size / 2, y: p.y - size / 2, width: size, height: size, class: "handle", "data-handle": handle, "data-id": a.id, "stroke-width": 1.5, "vector-effect": "non-scaling-stroke", style: `cursor:${CURSORS[handle]}` });
+        handleNodes.set(handle, node);
+        svg.append(node);
+      }
+    }
+    if (ui.draft) {
+      const color = classById(activeClassId())?.color ?? "#999999";
+      svg.append(svgEl("rect", { x: ui.draft.x, y: ui.draft.y, width: ui.draft.w, height: ui.draft.h, fill: color, "fill-opacity": 0.2, stroke: color, "stroke-width": 2, "stroke-dasharray": "6 4", "vector-effect": "non-scaling-stroke", "pointer-events": "none" }));
+    }
+  }
+
+  /** Rebuild `host` with `build()` and put keyboard focus back on the element that had it. */
+  function rebuild(host, build) {
+    const key = document.activeElement?.closest?.("[data-fk]")?.dataset.fk;
+    host.replaceChildren(...build());
+    if (key) host.querySelector(`[data-fk="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
+  }
+  const fk = (key) => ({ "data-fk": key });
+
+  function renderToolstrip() {
+    const tool = (name, label, iconName, key) => el("button", { class: "btn btn-quiet btn-icon", type: "button", "aria-label": `${label} (${key})`, title: `${label} (${key})`, "aria-pressed": String(ui.tool === name), ...fk(`tool:${name}`), onclick: () => setTool(name) }, icon(iconName));
+    const plain = (label, iconName, handler, disabled = false) => el("button", { class: "btn btn-quiet btn-icon", type: "button", "aria-label": label, title: label, disabled, ...fk(`btn:${label}`), onclick: handler }, icon(iconName));
+    rebuild(toolstrip, () => [
+      tool("select", "Select", "cursor", "V"), tool("box", "Draw box", "box", "B"), tool("pan", "Pan", "move", "H"),
+      el("hr", { class: "tool-sep" }),
+      plain("Zoom in (+)", "zoom-in", () => zoomStep(1.25)), plain("Zoom out (−)", "zoom-out", () => zoomStep(0.8)), plain("Fit to window (0)", "fit", fit),
+      el("hr", { class: "tool-sep" }),
+      plain("Undo (Ctrl+Z)", "undo", undo, !history.canUndo), plain("Redo (Ctrl+Shift+Z)", "redo", redo, !history.canRedo),
+    ]);
+    stage.dataset.tool = ui.tool;
+  }
+
+  function renderInspector() {
+    const state = current();
+    const total = stats.images;
+    const labelledNow = stats.labelled + (isLabelled(state) ? 1 : 0) - (initialLabelled ? 1 : 0);
+    rebuild(inspector, () => {
+      const parts = [];
+      parts.push(
+        el("div", { class: "a-section" },
+          el("h2", { class: "a-title", text: image.original_name }),
+          el("p", { class: "muted num", text: `Image ${neighbours.index} of ${neighbours.total} · ${labelledNow.toLocaleString()} of ${total.toLocaleString()} labelled` }),
+          el("div", { class: "progress", role: "progressbar", "aria-label": "Labelling progress", "aria-valuemin": "0", "aria-valuemax": String(total), "aria-valuenow": String(labelledNow) }, el("div", { style: `width:${total ? (labelledNow / total) * 100 : 0}%` }))),
+      );
+      // image label (single-label classification)
+      parts.push(
+        el("div", { class: "a-section" }, el("h3", { text: "Image label" }),
+          el("div", { class: "radio-list", role: "radiogroup", "aria-label": "Image label" },
+            ...classes.map((c, i) => el("button", { class: "radio", type: "button", role: "radio", "aria-checked": String(state.label_class_id === c.id), ...fk(`label:${c.id}`), onclick: () => toggleLabel(c.id) },
+              el("i", { class: "swatch-dot", style: `background:${c.color}` }), c.name, i < 9 ? el("kbd", { text: `⇧${i + 1}` }) : null)),
+            classes.length ? null : el("span", { class: "hint", text: "Add a class to label whole images." }))),
+      );
+      // classes
+      const counts = new Map();
+      for (const a of state.annotations) counts.set(a.class_id, (counts.get(a.class_id) ?? 0) + 1);
+      parts.push(
+        el("div", { class: "a-section" },
+          el("div", { class: "a-row-head" }, el("h3", { text: "Classes" }), el("button", { class: "btn", type: "button", ...fk("add-class"), onclick: addClass }, icon("plus"), "Add")),
+          classes.length
+            ? el("ul", { class: "class-list" }, ...classes.map((c, i) => el("li", {},
+                el("button", { class: "class-row", type: "button", "aria-pressed": String(activeClassId() === c.id), ...fk(`class:${c.id}`), onclick: () => chooseClass(c.id) },
+                  el("i", { class: "swatch-dot", style: `background:${c.color}` }), el("span", { class: "grow", text: c.name }), el("span", { class: "muted num", text: String(counts.get(c.id) ?? 0) }), i < 9 ? el("kbd", { text: String(i + 1) }) : null),
+                el("button", { class: "btn btn-quiet btn-icon", type: "button", "aria-label": `Edit class ${c.name}`, ...fk(`edit-class:${c.id}`), onclick: () => editClass(c) }, icon("edit")))))
+            : el("p", { class: "hint", text: "No classes yet. Add one to start drawing boxes." })),
+      );
+      // annotations list
+      parts.push(
+        el("div", { class: "a-section" }, el("h3", { text: `Annotations (${state.annotations.length})` }),
+          state.annotations.length
+            ? el("ul", { class: "ann-list" }, ...state.annotations.map((a, i) => el("li", {},
+                el("button", { class: "ann-row", type: "button", "aria-pressed": String(ui.selection.has(a.id)), ...fk(`ann:${a.id}`), onclick: (event) => selectFromList(a.id, event) },
+                  el("i", { class: "swatch-dot", style: `background:${classById(a.class_id)?.color ?? "#999"}` }), `${a.kind === "box" ? "Box" : a.kind} ${i + 1} · ${classById(a.class_id)?.name ?? "?"}`),
+                el("button", { class: "btn btn-quiet btn-icon", type: "button", "aria-label": `Delete annotation ${i + 1}`, ...fk(`del:${a.id}`), onclick: () => deleteIds([a.id]) }, icon("trash")))))
+            : el("p", { class: "hint", text: state.marked_empty ? "Marked as having no objects." : "Nothing drawn yet." })),
+      );
+      // image-level actions
+      parts.push(
+        el("div", { class: "a-section a-actions" },
+          el("button", { class: "btn", type: "button", "aria-pressed": String(state.marked_empty), ...fk("no-objects"), onclick: toggleEmpty }, icon("check"), "No objects ", el("kbd", { text: "E" })),
+          el("button", { class: "btn", type: "button", disabled: neighbours.previous === null, ...fk("repeat"), onclick: repeatPrevious }, icon("copy"), "Repeat previous image"),
+        ),
+      );
+      return parts;
+    });
+  }
+
+  function renderFilmstrip(items) {
+    filmstrip.replaceChildren(
+      ...items.map((item) => el("button", { class: "film-item", type: "button", role: "listitem", "aria-label": `${item.original_name}${item.id === imageId ? " (current)" : ""}`, ...(item.id === imageId ? { "aria-current": "true" } : {}), "data-id": String(item.id), "data-labelled": String(item.annotation_count > 0 || item.marked_empty || item.label_class_id !== null), onclick: () => go(item.id) },
+        el("img", { src: item.thumb_url, alt: "", draggable: "false", loading: "lazy" }))),
+    );
+    filmstrip.querySelector("[aria-current]")?.scrollIntoView({ inline: "center", block: "nearest" });
+  }
+  async function loadFilmstrip() {
+    const size = limits.filmstrip_size;
+    const start = Math.max(0, Math.min(neighbours.index - 1 - Math.floor(size / 2), neighbours.total - size));
+    try {
+      const page = await api(`/api/projects/${projectId}/images?offset=${start}&limit=${size}`);
+      renderFilmstrip(page.items);
+    } catch {
+      /* the filmstrip is a convenience; the annotator works without it */
+    }
+  }
+  function updateFilmDot() {
+    const dot = filmstrip.querySelector("[aria-current]");
+    if (dot) dot.dataset.labelled = String(isLabelled(history.present));
+  }
+
+  function renderAll() {
+    renderShapes();
+    renderToolstrip();
+    renderInspector();
+    updateFilmDot();
+  }
+
+  // ---- editing ----------------------------------------------------------------------------
+  function commit(next, options = {}) {
+    ui.preview = null;
+    const changed = history.push(next, options);
+    const present = new Set(history.present.annotations.map((a) => a.id));
+    for (const id of [...ui.selection]) if (!present.has(id)) ui.selection.delete(id);
+    if (changed) saver.edit(toPayload(history.present));
+    renderAll();
+    return changed;
+  }
+  function undo() {
+    if (!history.undo()) return;
+    ui.preview = null;
+    afterHistoryMove("Undone");
+  }
+  function redo() {
+    if (!history.redo()) return;
+    ui.preview = null;
+    afterHistoryMove("Redone");
+  }
+  function afterHistoryMove(message) {
+    const present = new Set(history.present.annotations.map((a) => a.id));
+    for (const id of [...ui.selection]) if (!present.has(id)) ui.selection.delete(id);
+    saver.edit(toPayload(history.present));
+    renderAll();
+    announce(message);
+  }
+  function setTool(name) {
+    ui.tool = name;
+    renderToolstrip();
+    announce(`${name === "box" ? "Box" : name === "pan" ? "Pan" : "Select"} tool`);
+  }
+  function needClass() {
+    toast("Add a class first, then draw.", { error: true });
+    addClass();
+  }
+  function deleteIds(ids) {
+    if (!ids.length) return;
+    commit(deleteAnnotations(history.present, ids));
+    announce(`${plural(ids.length, "annotation")} deleted`);
+  }
+  function deleteSelection() { deleteIds([...ui.selection]); }
+  function duplicateSelection() {
+    if (!ui.selection.size) return;
+    const { state, ids } = duplicateAnnotations(history.present, [...ui.selection], newId, 10, width, height);
+    commit(state);
+    ui.selection = new Set(ids);
+    renderAll();
+    announce(`${plural(ids.length, "annotation")} duplicated`);
+  }
+  function chooseClass(classId) {
+    ui.activeClass = classId;
+    if (ui.selection.size) commit(setClass(history.present, [...ui.selection], classId));
+    else renderInspector();
+    announce(`Class ${classById(classId)?.name}`);
+  }
+  function toggleLabel(classId) {
+    commit(setLabel(history.present, history.present.label_class_id === classId ? null : classId));
+  }
+  function toggleEmpty() {
+    const state = history.present;
+    if (!state.marked_empty && !canMarkEmpty(state)) {
+      toast("This image has annotations. Delete them first to mark it as having no objects.", { error: true });
+      return;
+    }
+    commit(setMarkedEmpty(state, !state.marked_empty));
+    announce(history.present.marked_empty ? "Marked as no objects" : "No longer marked as no objects");
+  }
+  function selectFromList(id, event) {
+    if (event.shiftKey || event.ctrlKey || event.metaKey) {
+      if (ui.selection.has(id)) ui.selection.delete(id); else ui.selection.add(id);
+    } else {
+      ui.selection = new Set([id]);
+    }
+    renderAll();
+  }
+  function nudge(dx, dy, resize) {
+    const ids = [...ui.selection];
+    if (!ids.length) return;
+    const state = history.present;
+    commit(resize ? resizeAnnotationsBy(state, ids, dx, dy, width, height, minBox()) : moveAnnotations(state, ids, dx, dy, width, height), { key: resize ? "resize" : "nudge" });
+  }
+  function boxAtCentre() {
+    const classId = activeClassId();
+    if (classId === null) { needClass(); return; }
+    const r = stageRect();
+    const visible = visibleRect(ui.view, r.width, r.height, width, height);
+    const box = defaultBox(visible.x + visible.w / 2, visible.y + visible.h / 2, visible.w, visible.h, width, height);
+    const id = newId();
+    commit(addBox(history.present, id, classId, box));
+    ui.selection = new Set([id]);
+    renderAll();
+    announce("Box added. Use the arrow keys to move it and Alt with the arrows to resize.");
+  }
+  async function repeatPrevious() {
+    if (neighbours.previous === null) return;
+    try {
+      const previous = await api(`/api/images/${neighbours.previous}/annotations`);
+      const { state, ids } = appendFromServer(history.present, previous, newId, new Set(classes.map((c) => c.id)));
+      if (!ids.length) { toast("The previous image has no annotations to copy."); return; }
+      commit(state);
+      ui.selection = new Set(ids);
+      renderAll();
+      toast(`Copied ${plural(ids.length, "annotation")} from the previous image`, { actionLabel: "Undo", onAction: undo });
+    } catch (error) {
+      toast(error.message, { error: true });
+    }
+  }
+
+  // ---- classes ----------------------------------------------------------------------------
+  async function reloadClasses(kind) {
+    if (kind === "deleted") {
+      // Deleting a class can delete annotations on this image: reload everything from the server.
+      await saver.flush();
+      await loadAll();
+      hideBanner();
+      renderAll();
+      return;
+    }
+    classes = await api(`/api/projects/${projectId}/classes`);
+    if (kind === "created" && ui.activeClass === null) ui.activeClass = classes[0]?.id ?? null;
+    renderAll();
+  }
+  function addClass() { openClassDialog({ projectId, existing: null, onChanged: reloadClasses }); }
+  function editClass(cls) { openClassDialog({ projectId, existing: cls, onChanged: reloadClasses }); }
+
+  // ---- saving: recovery and conflicts -------------------------------------------------------
+  function offerConflictChoice() {
+    showBanner("This image was changed somewhere else, for example in another tab.", [
+      { label: "Load the latest version", onClick: async () => { await loadServerState(); hideBanner(); renderAll(); } },
+      { label: "Keep my version", onClick: async () => {
+        const latest = await api(`/api/images/${imageId}/annotations`);
+        const mine = toPayload(history.present);
+        saver.reset(latest.rev);
+        saver.edit(mine);
+        hideBanner();
+      } },
+    ]);
+  }
+  function offerDraftRestore() {
+    const draft = storage ? readDraft(storage, imageId) : null;
+    if (!draft) return;
+    if (JSON.stringify(draft.payload) === JSON.stringify(toPayload(history.present))) { clearDraft(storage, imageId); return; }
+    showBanner("You have unsaved changes for this image from earlier on this computer.", [
+      { label: "Restore them", onClick: () => {
+        const restored = dropUnknownClasses(fromServer(draft.payload, newId), new Set(classes.map((c) => c.id)));
+        commit(restored);
+        hideBanner();
+        announce("Unsaved changes restored");
+      } },
+      { label: "Discard them", onClick: () => { clearDraft(storage, imageId); hideBanner(); } },
+    ]);
+  }
+  const sendOnHide = () => {
+    const pending = saver?.takePendingForBeacon();
+    if (!pending) return;
+    try {
+      fetch(`/api/images/${imageId}/annotations`, { method: "PUT", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...pending, rev: saver.currentRev }) }).catch(() => {});
+    } catch { /* the local draft still holds the edit */ }
+  };
+  listen(document, "visibilitychange", () => { if (document.visibilityState === "hidden") sendOnHide(); });
+  listen(window, "pagehide", sendOnHide);
+
+  // ---- navigation -------------------------------------------------------------------------
+  async function go(id) {
+    if (id === null || id === undefined) { toast("There is no image in that direction."); return; }
+    await saver.flush();
+    if (saver.status === "error" || saver.status === "conflict") {
+      toast("Your latest edits could not be saved yet. They are kept on this computer and offered again when you return.", { error: true });
+    }
+    navigate(`/projects/${projectId}/annotate/${id}`);
+  }
+
+  // ---- pointer ----------------------------------------------------------------------------
+  listen(stage, "pointerdown", (event) => {
+    if (event.button === 2) return;
+    stage.focus({ preventScroll: true });
+    const p = imagePoint(event);
+    if (event.button === 1 || ui.tool === "pan" || ui.space) {
+      ui.drag = { type: "pan", x: event.clientX, y: event.clientY };
+      stage.setPointerCapture(event.pointerId);
+      stage.classList.add("panning");
+      event.preventDefault();
+      return;
+    }
+    if (event.button !== 0) return;
+    if (ui.tool === "box") {
+      if (activeClassId() === null) {
+        // Do not open the dialog on press: the release would land on it and steal its focus.
+        ui.drag = { type: "needclass" };
+        stage.setPointerCapture(event.pointerId);
+        return;
+      }
+      ui.drag = { type: "draw", x0: p.x, y0: p.y };
+      ui.draft = boxFromPoints(p.x, p.y, p.x, p.y, width, height);
+      stage.setPointerCapture(event.pointerId);
+      return;
+    }
+    const handleNode = event.target.closest?.("[data-handle]");
+    const shapeNode = event.target.closest?.("[data-id]");
+    if (handleNode) {
+      ui.drag = { type: "resize", id: handleNode.dataset.id, handle: handleNode.dataset.handle, start: history.present, moved: false };
+      stage.setPointerCapture(event.pointerId);
+    } else if (shapeNode) {
+      const id = shapeNode.dataset.id;
+      if (event.shiftKey) { if (ui.selection.has(id)) ui.selection.delete(id); else ui.selection.add(id); }
+      else if (!ui.selection.has(id)) ui.selection = new Set([id]);
+      ui.drag = { type: "move", ids: [...ui.selection], start: history.present, x0: p.x, y0: p.y, sx0: p.sx, sy0: p.sy, moved: false };
+      stage.setPointerCapture(event.pointerId);
+      renderAll();
+    } else if (!event.shiftKey && ui.selection.size) {
+      ui.selection.clear();
+      renderAll();
+    }
+  });
+  listen(stage, "pointermove", (event) => {
+    const p = imagePoint(event);
+    updateHud(p);
+    const drag = ui.drag;
+    if (!drag) return;
+    if (drag.type === "pan") {
+      ui.view = panBy(ui.view, event.clientX - drag.x, event.clientY - drag.y);
+      drag.x = event.clientX; drag.y = event.clientY;
+      ui.fitted = false;
+      viewport.style.transform = `translate(${ui.view.tx}px, ${ui.view.ty}px) scale(${ui.view.scale})`;
+    } else if (drag.type === "draw") {
+      ui.draft = boxFromPoints(drag.x0, drag.y0, p.x, p.y, width, height);
+      renderShapes();
+    } else if (drag.type === "move") {
+      if (!drag.moved && Math.hypot(p.sx - drag.sx0, p.sy - drag.sy0) < DRAG_START_PX) return;
+      drag.moved = true;
+      ui.preview = moveAnnotations(drag.start, drag.ids, p.x - drag.x0, p.y - drag.y0, width, height);
+      updateGeometry();
+    } else if (drag.type === "resize") {
+      drag.moved = true;
+      ui.preview = resizeAnnotationTo(drag.start, drag.id, drag.handle, p.x, p.y, width, height, minBox());
+      updateGeometry();
+    }
+  });
+  const finishDrag = (event, cancelled) => {
+    const drag = ui.drag;
+    if (!drag) return;
+    ui.drag = null;
+    stage.classList.remove("panning");
+    try { stage.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+    if (drag.type === "pan") { applyView(); return; }
+    if (drag.type === "needclass") { if (!cancelled) needClass(); return; }
+    if (drag.type === "draw") {
+      const box = ui.draft;
+      ui.draft = null;
+      const bigEnough = box && box.w * ui.view.scale >= MIN_DRAW_PX && box.h * ui.view.scale >= MIN_DRAW_PX && box.w >= minBox() && box.h >= minBox();
+      if (!cancelled && bigEnough) {
+        const id = newId();
+        commit(addBox(history.present, id, activeClassId(), box));
+        ui.selection = new Set([id]);
+        renderAll();
+        announce("Box added");
+      } else {
+        renderShapes();
+      }
+      return;
+    }
+    if (!cancelled && drag.moved && ui.preview) commit(ui.preview);
+    else { ui.preview = null; renderShapes(); }
+  };
+  listen(stage, "pointerup", (event) => finishDrag(event, false));
+  listen(stage, "pointercancel", (event) => finishDrag(event, true));
+  listen(stage, "wheel", (event) => {
+    event.preventDefault();
+    const { sx, sy } = stagePoint(event);
+    ui.view = zoomAt(ui.view, Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 0.0015)), sx, sy);
+    ui.fitted = false;
+    applyView();
+  }, { passive: false });
+
+  // ---- keyboard ---------------------------------------------------------------------------
+  const DIGITS = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4, Digit5: 5, Digit6: 6, Digit7: 7, Digit8: 8, Digit9: 9 };
+  listen(document, "keydown", (event) => {
+    if (document.querySelector("dialog[open]") || isTyping(event.target)) return;
+    const key = event.key;
+    const lower = key.toLowerCase();
+    const ctrl = event.ctrlKey || event.metaKey;
+    const onStage = event.target === stage || event.target === document.body || stage.contains(event.target);
+
+    if (ctrl) {
+      if (lower === "z") { event.preventDefault(); if (event.shiftKey) redo(); else undo(); }
+      else if (lower === "y") { event.preventDefault(); redo(); }
+      else if (lower === "d") { event.preventDefault(); duplicateSelection(); }
+      else if (lower === "a" && onStage) { event.preventDefault(); ui.selection = new Set(history.present.annotations.map((a) => a.id)); renderAll(); }
+      return; // Ctrl+K and friends belong to the app shell
+    }
+    if (event.code in DIGITS && !event.altKey) {
+      const target = classes[DIGITS[event.code] - 1];
+      if (!target) return;
+      event.preventDefault();
+      if (event.shiftKey) toggleLabel(target.id); else chooseClass(target.id);
+      return;
+    }
+    if (key === " " && onStage) { event.preventDefault(); ui.space = true; stage.classList.add("space-pan"); return; }
+    if (lower === "v") setTool("select");
+    else if (lower === "b") setTool("box");
+    else if (lower === "h") setTool("pan");
+    else if (key === "0") fit();
+    else if (key === "+" || key === "=") zoomStep(1.25);
+    else if (key === "-") zoomStep(0.8);
+    else if (lower === "a" && !event.shiftKey) go(neighbours.previous);
+    else if (lower === "d" && !event.shiftKey) go(neighbours.next);
+    else if (lower === "n") go(neighbours.next_unlabelled);
+    else if (lower === "e") toggleEmpty();
+    else if ((key === "Delete" || key === "Backspace") && onStage) { event.preventDefault(); deleteSelection(); }
+    else if (key === "Escape") {
+      if (ui.drag) finishDrag({ pointerId: -1 }, true);
+      else if (ui.selection.size) { ui.selection.clear(); renderAll(); }
+    } else if (key === "Enter" && onStage && ui.tool === "box") { event.preventDefault(); boxAtCentre(); }
+    else if (key === "Tab" && event.target === stage) {
+      const only = ui.selection.size === 1 ? [...ui.selection][0] : null;
+      const next = cycle(history.present, only, event.shiftKey ? -1 : 1);
+      if (next !== null) { event.preventDefault(); ui.selection = new Set([next]); renderAll(); announce(`Annotation ${history.present.annotations.findIndex((a) => a.id === next) + 1} selected`); }
+    } else if (onStage && key.startsWith("Arrow") && ui.selection.size) {
+      event.preventDefault();
+      const step = event.shiftKey ? NUDGE_BIG : NUDGE;
+      nudge(key === "ArrowRight" ? step : key === "ArrowLeft" ? -step : 0, key === "ArrowDown" ? step : key === "ArrowUp" ? -step : 0, event.altKey);
+    }
+  });
+  listen(document, "keyup", (event) => {
+    if (event.key === " ") { ui.space = false; stage.classList.remove("space-pan"); }
+  });
+
+  // ---- start ------------------------------------------------------------------------------
+  ui.activeClass = classes[0]?.id ?? null;
+  setToolbar({
+    title: image.original_name,
+    actions: [
+      el("a", { class: "btn btn-quiet", href: `#/projects/${projectId}` }, icon("back"), "Gallery"),
+      el("button", { class: "btn btn-icon", type: "button", "aria-label": "Previous image (A)", title: "Previous image (A)", disabled: neighbours.previous === null, onclick: () => go(neighbours.previous) }, icon("back")),
+      el("button", { class: "btn btn-icon", type: "button", "aria-label": "Next image (D)", title: "Next image (D)", disabled: neighbours.next === null, onclick: () => go(neighbours.next) }, icon("next")),
+      el("button", { class: "btn", type: "button", disabled: neighbours.next_unlabelled === null, onclick: () => go(neighbours.next_unlabelled) }, "Next unlabelled ", el("kbd", { text: "N" })),
+      statusChip,
+    ],
+    commands: [
+      { label: "Next unlabelled image", hint: "N", run: () => go(neighbours.next_unlabelled) },
+      { label: "Mark image as having no objects", hint: "E", run: toggleEmpty },
+      { label: "Fit image to window", hint: "0", run: fit },
+      { label: "Undo", hint: "Ctrl Z", run: undo },
+      { label: "Redo", hint: "Ctrl Shift Z", run: redo },
+      { label: "Add a class", hint: "", run: addClass },
+      { label: "Repeat previous image's annotations", hint: "", run: repeatPrevious },
+    ],
+  });
+  fit();
+  renderAll();
+  loadFilmstrip();
+  offerDraftRestore();
+  stage.focus({ preventScroll: true });
+
+  return () => {
+    for (const undoListener of cleanups) undoListener();
+    if (saver) {
+      const done = saver;
+      done.flush().finally(() => done.dispose()); // finish saving in the background after leaving
+    }
+  };
+}

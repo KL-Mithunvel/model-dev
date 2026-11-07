@@ -44,6 +44,7 @@ annotations:
   max_points: 2000               # vertices per polygon / points per keypoint instance
   min_box_px: 1                  # smallest box side the server accepts
   min_polygon_area_px: 1         # polygons flatter than this are rejected
+  simplify_epsilon_px: 2         # 'Simplify polygon' drops points within this distance of the outline
   coord_tolerance_px: 0.5        # allowed overshoot past the image edge (rounding in browsers)
   undo_limit: 500                # history steps kept in the browser
   save_debounce_ms: 400          # wait this long after an edit before saving

@@ -7,8 +7,12 @@ import {
   addBox, appendFromServer, canMarkEmpty, cycle, deleteAnnotations, dropUnknownClasses,
   duplicateAnnotations, fromServer, makeIdFactory, moveAnnotations, resizeAnnotationsBy,
   resizeAnnotationTo, setClass, setLabel, setMarkedEmpty, toPayload,
+  addPolygon, insertVertex, moveVertex, removeVertex, simplifyAnnotation,
 } from "../editor.js";
-import { HANDLES, boxFromPoints, defaultBox, fitView, handlePoint, panBy, screenToImage, visibleRect, zoomAt } from "../geometry.js";
+import {
+  HANDLES, boxFromPoints, defaultBox, defaultPolygon, fitView, handlePoint, midpoint, panBy,
+  polygonArea, polygonBounds, polygonSelfIntersects, screenToImage, visibleRect, zoomAt,
+} from "../geometry.js";
 import { createHistory } from "../history.js";
 import { limits } from "../limits.js";
 import { clearDraft, createSaver, readDraft } from "../saver.js";
@@ -18,6 +22,8 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const HANDLE_SIZE_PX = 10; // size of a resize handle on screen, whatever the zoom
 const MIN_DRAW_PX = 4; // a drag shorter than this on screen is a click, not a box
 const DRAG_START_PX = 3; // a press must move this far before it moves a shape
+const CLOSE_RADIUS_PX = 10; // clicking this close to the first point closes a polygon
+const MIN_POINT_GAP_PX = 3; // a second click this close to the last point is a double-click, not a new point
 const NUDGE = 1;
 const NUDGE_BIG = 10;
 const CURSORS = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize" };
@@ -45,7 +51,7 @@ const isLabelled = (state) => state.annotations.length > 0 || state.marked_empty
 export async function mount(container, { setToolbar, navigate, projectId, imageId }) {
   const storage = safeStorage();
   const newId = makeIdFactory();
-  const ui = { tool: "select", activeClass: null, selection: new Set(), view: { scale: 1, tx: 0, ty: 0 }, fitted: true, preview: null, draft: null, drag: null, space: false };
+  const ui = { tool: "select", activeClass: null, selection: new Set(), view: { scale: 1, tx: 0, ty: 0 }, fitted: true, preview: null, draft: null, poly: null, vertex: null, drag: null, space: false };
   let image = null;
   let classes = [];
   let neighbours = null;
@@ -200,13 +206,38 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   let shapeNodes = new Map(); // annotation id -> { rect, label }
   let handleNodes = new Map(); // handle name -> rect
 
-  function placeBox(nodes, data, scale) {
-    nodes.rect.setAttribute("x", data.x);
-    nodes.rect.setAttribute("y", data.y);
-    nodes.rect.setAttribute("width", data.w);
-    nodes.rect.setAttribute("height", data.h);
-    nodes.label.setAttribute("x", data.x + 3 / scale);
-    nodes.label.setAttribute("y", data.y + 14 / scale);
+  const pointsAttr = (points) => points.map(([x, y]) => `${x},${y}`).join(" ");
+  const MAX_MID_HANDLES = 150; // beyond this many points the edge-midpoint handles only add clutter and cost
+
+  /** Position the main shape node and its label for one annotation (box or polygon). */
+  function placeShape(nodes, a, scale) {
+    if (a.kind === "box") {
+      nodes.rect.setAttribute("x", a.data.x);
+      nodes.rect.setAttribute("y", a.data.y);
+      nodes.rect.setAttribute("width", a.data.w);
+      nodes.rect.setAttribute("height", a.data.h);
+      nodes.label.setAttribute("x", a.data.x + 3 / scale);
+      nodes.label.setAttribute("y", a.data.y + 14 / scale);
+    } else {
+      nodes.rect.setAttribute("points", pointsAttr(a.data.points));
+      const bounds = polygonBounds(a.data.points);
+      nodes.label.setAttribute("x", bounds.minX + 3 / scale);
+      nodes.label.setAttribute("y", bounds.minY + 14 / scale);
+    }
+  }
+
+  function placeVertexHandles(points) {
+    const size = HANDLE_SIZE_PX / ui.view.scale;
+    points.forEach(([x, y], i) => {
+      const vertex = handleNodes.get(`v${i}`);
+      if (vertex) { vertex.setAttribute("x", x - size / 2); vertex.setAttribute("y", y - size / 2); }
+      const mid = handleNodes.get(`m${i}`);
+      if (mid) {
+        const [mx, my] = midpoint(points[i], points[(i + 1) % points.length]);
+        mid.setAttribute("cx", mx);
+        mid.setAttribute("cy", my);
+      }
+    });
   }
 
   /** While dragging: move the existing nodes instead of rebuilding all of them (keeps 200+ shapes smooth). */
@@ -215,16 +246,19 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     const scale = ui.view.scale;
     for (const a of state.annotations) {
       const nodes = shapeNodes.get(a.id);
-      if (nodes && a.kind === "box") placeBox(nodes, a.data, scale);
+      if (nodes) placeShape(nodes, a, scale);
     }
-    const chosen = state.annotations.filter((a) => ui.selection.has(a.id) && a.kind === "box");
-    if (chosen.length === 1) {
+    const chosen = state.annotations.filter((a) => ui.selection.has(a.id));
+    if (chosen.length !== 1) return;
+    if (chosen[0].kind === "box") {
       const size = HANDLE_SIZE_PX / scale;
       for (const [handle, node] of handleNodes) {
         const p = handlePoint(chosen[0].data, handle);
         node.setAttribute("x", p.x - size / 2);
         node.setAttribute("y", p.y - size / 2);
       }
+    } else if (chosen[0].kind === "polygon") {
+      placeVertexHandles(chosen[0].data.points);
     }
   }
 
@@ -235,19 +269,22 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     handleNodes = new Map();
     svg.replaceChildren();
     for (const a of state.annotations) {
-      if (a.kind !== "box") continue;
+      if (a.kind !== "box" && a.kind !== "polygon") continue;
       const color = classById(a.class_id)?.color ?? "#999999";
       const selected = ui.selection.has(a.id);
       const group = svgEl("g", { class: `shape${selected ? " selected" : ""}`, "data-id": a.id });
-      const rect = svgEl("rect", { x: a.data.x, y: a.data.y, width: a.data.w, height: a.data.h, fill: color, "fill-opacity": selected ? 0.3 : 0.14, stroke: color, "stroke-width": selected ? 3 : 2, "vector-effect": "non-scaling-stroke" });
-      const label = svgEl("text", { x: a.data.x + 3 / scale, y: a.data.y + 14 / scale, "font-size": 12 / scale });
+      const look = { fill: color, "fill-opacity": selected ? 0.3 : 0.14, stroke: color, "stroke-width": selected ? 3 : 2, "vector-effect": "non-scaling-stroke" };
+      const main = a.kind === "box" ? svgEl("rect", look) : svgEl("polygon", { ...look, "stroke-linejoin": "round" });
+      const label = svgEl("text", { "font-size": 12 / scale });
       label.textContent = classById(a.class_id)?.name ?? "?";
-      group.append(rect, label);
+      group.append(main, label);
       svg.append(group);
-      shapeNodes.set(a.id, { rect, label });
+      const nodes = { rect: main, label };
+      shapeNodes.set(a.id, nodes);
+      placeShape(nodes, a, scale);
     }
-    const chosen = state.annotations.filter((a) => ui.selection.has(a.id) && a.kind === "box");
-    if (chosen.length === 1) {
+    const chosen = state.annotations.filter((a) => ui.selection.has(a.id));
+    if (chosen.length === 1 && chosen[0].kind === "box") {
       const a = chosen[0];
       const size = HANDLE_SIZE_PX / scale;
       for (const handle of HANDLES) {
@@ -256,11 +293,45 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
         handleNodes.set(handle, node);
         svg.append(node);
       }
+    } else if (chosen.length === 1 && chosen[0].kind === "polygon") {
+      const a = chosen[0];
+      const points = a.data.points;
+      const size = HANDLE_SIZE_PX / scale;
+      if (points.length <= MAX_MID_HANDLES) {
+        points.forEach((_, i) => {
+          const mid = svgEl("circle", { r: (size * 0.35), class: "handle mid", "data-mid": i, "data-id": a.id, "stroke-width": 1.5, "vector-effect": "non-scaling-stroke", style: "cursor:copy" });
+          handleNodes.set(`m${i}`, mid);
+          svg.append(mid);
+        });
+      }
+      points.forEach((_, i) => {
+        const active = ui.vertex && ui.vertex.id === a.id && ui.vertex.index === i;
+        const vertex = svgEl("rect", { width: size, height: size, class: `handle vertex${active ? " active" : ""}`, "data-vertex": i, "data-id": a.id, "stroke-width": 1.5, "vector-effect": "non-scaling-stroke", style: "cursor:move" });
+        handleNodes.set(`v${i}`, vertex);
+        svg.append(vertex);
+      });
+      placeVertexHandles(points);
     }
     if (ui.draft) {
       const color = classById(activeClassId())?.color ?? "#999999";
       svg.append(svgEl("rect", { x: ui.draft.x, y: ui.draft.y, width: ui.draft.w, height: ui.draft.h, fill: color, "fill-opacity": 0.2, stroke: color, "stroke-width": 2, "stroke-dasharray": "6 4", "vector-effect": "non-scaling-stroke", "pointer-events": "none" }));
     }
+    if (ui.poly && ui.poly.points.length) renderPolygonDraft(scale);
+  }
+
+  /** The polygon being drawn: outline so far, a rubber band to the pointer, and the closing target. */
+  function renderPolygonDraft(scale) {
+    const color = classById(activeClassId())?.color ?? "#999999";
+    const points = ui.poly.points;
+    const all = ui.poly.cursor ? [...points, ui.poly.cursor] : points;
+    if (all.length >= 3) svg.append(svgEl("polygon", { points: pointsAttr(all), fill: color, "fill-opacity": 0.12, "pointer-events": "none" }));
+    svg.append(svgEl("polyline", { points: pointsAttr(all), fill: "none", stroke: color, "stroke-width": 2, "stroke-dasharray": "6 4", "vector-effect": "non-scaling-stroke", "pointer-events": "none" }));
+    const closable = points.length >= 3;
+    const near = closable && ui.poly.cursor && Math.hypot(ui.poly.cursor[0] - points[0][0], ui.poly.cursor[1] - points[0][1]) * scale <= CLOSE_RADIUS_PX;
+    points.forEach(([x, y], i) => {
+      const first = i === 0 && closable;
+      svg.append(svgEl("circle", { cx: x, cy: y, r: (first ? 7 : 4) / scale, fill: color, class: `poly-dot${first ? " close-target" : ""}${first && near ? " hot" : ""}`, "pointer-events": "none" }));
+    });
   }
 
   /** Rebuild `host` with `build()` and put keyboard focus back on the element that had it. */
@@ -275,7 +346,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     const tool = (name, label, iconName, key) => el("button", { class: "btn btn-quiet btn-icon", type: "button", "aria-label": `${label} (${key})`, title: `${label} (${key})`, "aria-pressed": String(ui.tool === name), ...fk(`tool:${name}`), onclick: () => setTool(name) }, icon(iconName));
     const plain = (label, iconName, handler, disabled = false) => el("button", { class: "btn btn-quiet btn-icon", type: "button", "aria-label": label, title: label, disabled, ...fk(`btn:${label}`), onclick: handler }, icon(iconName));
     rebuild(toolstrip, () => [
-      tool("select", "Select", "cursor", "V"), tool("box", "Draw box", "box", "B"), tool("pan", "Pan", "move", "H"),
+      tool("select", "Select", "cursor", "V"), tool("box", "Draw box", "box", "B"), tool("polygon", "Draw polygon", "polygon", "P"), tool("pan", "Pan", "move", "H"),
       el("hr", { class: "tool-sep" }),
       plain("Zoom in (+)", "zoom-in", () => zoomStep(1.25)), plain("Zoom out (−)", "zoom-out", () => zoomStep(0.8)), plain("Fit to window (0)", "fit", fit),
       el("hr", { class: "tool-sep" }),
@@ -323,7 +394,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
           state.annotations.length
             ? el("ul", { class: "ann-list" }, ...state.annotations.map((a, i) => el("li", {},
                 el("button", { class: "ann-row", type: "button", "aria-pressed": String(ui.selection.has(a.id)), ...fk(`ann:${a.id}`), onclick: (event) => selectFromList(a.id, event) },
-                  el("i", { class: "swatch-dot", style: `background:${classById(a.class_id)?.color ?? "#999"}` }), `${a.kind === "box" ? "Box" : a.kind} ${i + 1} · ${classById(a.class_id)?.name ?? "?"}`),
+                  el("i", { class: "swatch-dot", style: `background:${classById(a.class_id)?.color ?? "#999"}` }), annotationLabel(a, i)),
                 el("button", { class: "btn btn-quiet btn-icon", type: "button", "aria-label": `Delete annotation ${i + 1}`, ...fk(`del:${a.id}`), onclick: () => deleteIds([a.id]) }, icon("trash")))))
             : el("p", { class: "hint", text: state.marked_empty ? "Marked as having no objects." : "Nothing drawn yet." })),
       );
@@ -332,6 +403,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
         el("div", { class: "a-section a-actions" },
           el("button", { class: "btn", type: "button", "aria-pressed": String(state.marked_empty), ...fk("no-objects"), onclick: toggleEmpty }, icon("check"), "No objects ", el("kbd", { text: "E" })),
           el("button", { class: "btn", type: "button", disabled: neighbours.previous === null, ...fk("repeat"), onclick: repeatPrevious }, icon("copy"), "Repeat previous image"),
+          ...(selectedPolygon() ? [el("button", { class: "btn", type: "button", ...fk("simplify"), onclick: simplifySelected }, icon("polygon"), "Simplify polygon")] : []),
         ),
       );
       return parts;
@@ -368,7 +440,14 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     if (dot) dot.dataset.labelled = String(isLabelled(history.present));
   }
 
+  function pruneVertex() {
+    if (!ui.vertex) return;
+    const polygon = selectedPolygon();
+    if (!polygon || polygon.id !== ui.vertex.id || ui.vertex.index >= polygon.data.points.length) ui.vertex = null;
+  }
+
   function renderAll() {
+    pruneVertex();
     renderShapes();
     renderToolstrip();
     renderInspector();
@@ -387,6 +466,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     return changed;
   }
   function undo() {
+    if (ui.poly && ui.poly.points.length) { removeLastPolygonPoint(); return; } // Ctrl+Z while drawing
     if (!history.undo()) return;
     ui.preview = null;
     afterHistoryMove("Undone");
@@ -405,8 +485,9 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   }
   function setTool(name) {
     ui.tool = name;
+    if (name !== "polygon" && ui.poly) { ui.poly = null; renderShapes(); }
     renderToolstrip();
-    announce(`${name === "box" ? "Box" : name === "pan" ? "Pan" : "Select"} tool`);
+    announce(`${{ box: "Box", polygon: "Polygon", pan: "Pan" }[name] ?? "Select"} tool`);
   }
   function needClass() {
     toast("Add a class first, then draw.", { error: true });
@@ -476,6 +557,127 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     renderAll();
     announce("Box added. Use the arrow keys to move it and Alt with the arrows to resize.");
   }
+  // ---- polygons ---------------------------------------------------------------------------
+  const screenGap = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) * ui.view.scale;
+
+  function addPolygonPoint(p) {
+    const point = [Math.min(Math.max(p.x, 0), width), Math.min(Math.max(p.y, 0), height)];
+    if (!ui.poly) ui.poly = { points: [], cursor: null };
+    const points = ui.poly.points;
+    if (points.length >= 3 && screenGap(point, points[0]) <= CLOSE_RADIUS_PX) { finishPolygon(); return; }
+    if (points.length && screenGap(point, points[points.length - 1]) < MIN_POINT_GAP_PX) return; // double-click
+    points.push(point);
+    ui.poly.cursor = point;
+    renderShapes();
+    announce(`Point ${points.length}`);
+  }
+
+  function removeLastPolygonPoint() {
+    if (!ui.poly) return;
+    ui.poly.points.pop();
+    if (!ui.poly.points.length) ui.poly = null;
+    renderShapes();
+  }
+
+  function finishPolygon() {
+    const poly = ui.poly;
+    if (!poly) return;
+    if (poly.points.length < 3) { toast("A polygon needs at least 3 points. Keep clicking to add more.", { error: true }); return; }
+    if (polygonArea(poly.points) < limits.min_polygon_area_px) { toast("That polygon is too flat or small. Add points that enclose some area.", { error: true }); return; }
+    if (!canAdd()) { ui.poly = null; renderShapes(); return; }
+    const id = newId();
+    const points = poly.points;
+    ui.poly = null;
+    commit(addPolygon(history.present, id, activeClassId(), points));
+    ui.selection = new Set([id]);
+    renderAll();
+    announce(`Polygon added with ${points.length} points`);
+    if (polygonSelfIntersects(points)) toast("This polygon crosses itself. Drag its points to fix it.");
+  }
+
+  function polygonAtCentre() {
+    const classId = activeClassId();
+    if (classId === null) { needClass(); return; }
+    if (!canAdd()) return;
+    const r = stageRect();
+    const visible = visibleRect(ui.view, r.width, r.height, width, height);
+    const points = defaultPolygon(visible.x + visible.w / 2, visible.y + visible.h / 2, visible.w, visible.h, width, height);
+    const id = newId();
+    commit(addPolygon(history.present, id, classId, points));
+    ui.selection = new Set([id]);
+    renderAll();
+    announce("Polygon added. Press ] to select a point, then use the arrow keys to move it.");
+  }
+
+  function selectedPolygon() {
+    if (ui.selection.size !== 1) return null;
+    const id = [...ui.selection][0];
+    const found = current().annotations.find((a) => a.id === id);
+    return found && found.kind === "polygon" ? found : null;
+  }
+
+  function stepVertex(direction) {
+    const polygon = selectedPolygon();
+    if (!polygon) return false;
+    const count = polygon.data.points.length;
+    const index = ui.vertex && ui.vertex.id === polygon.id ? (ui.vertex.index + direction + count) % count : direction > 0 ? 0 : count - 1;
+    ui.vertex = { id: polygon.id, index };
+    renderShapes();
+    announce(`Point ${index + 1} of ${count}`);
+    return true;
+  }
+
+  function deleteVertex(id, index) {
+    const next = removeVertex(history.present, id, index);
+    if (next === history.present) { toast("A polygon needs at least 3 points. Delete the whole polygon instead.", { error: true }); return; }
+    commit(next);
+    const left = next.annotations.find((a) => a.id === id).data.points.length;
+    ui.vertex = { id, index: Math.min(index, left - 1) };
+    renderAll();
+    announce(`Point removed, ${left} left`);
+  }
+
+  function insertVertexAfterCurrent() {
+    const polygon = selectedPolygon();
+    if (!polygon || !ui.vertex || ui.vertex.id !== polygon.id) return false;
+    const points = polygon.data.points;
+    const index = ui.vertex.index;
+    const [x, y] = midpoint(points[index], points[(index + 1) % points.length]);
+    commit(insertVertex(history.present, polygon.id, index, x, y, width, height));
+    ui.vertex = { id: polygon.id, index: index + 1 };
+    renderAll();
+    announce(`Point added, ${points.length + 1} points`);
+    return true;
+  }
+
+  function nudgeVertex(dx, dy) {
+    const polygon = selectedPolygon();
+    if (!polygon || !ui.vertex) return;
+    const [x, y] = polygon.data.points[ui.vertex.index];
+    commit(moveVertex(history.present, polygon.id, ui.vertex.index, x + dx, y + dy, width, height), { key: "vertexnudge" });
+  }
+
+  function simplifySelected() {
+    const polygon = selectedPolygon();
+    if (!polygon) { toast("Select a polygon first."); return; }
+    const { state, before, after } = simplifyAnnotation(history.present, polygon.id, limits.simplify_epsilon_px);
+    if (after >= before) { toast("Nothing to simplify: every point matters at this tolerance."); return; }
+    commit(state);
+    ui.vertex = null;
+    renderAll();
+    toast(`Reduced the polygon from ${before} to ${after} points`, { actionLabel: "Undo", onAction: undo });
+  }
+
+  function annotationLabel(a, i) {
+    const kind = a.kind === "box" ? "Box" : a.kind === "polygon" ? "Polygon" : a.kind;
+    let detail = "";
+    if (a.kind === "polygon") {
+      const crossing = a.data.points.length <= 300 && polygonSelfIntersects(a.data.points);
+      detail = ` · ${a.data.points.length} points${crossing ? " · crosses itself" : ""}`;
+    }
+    return `${kind} ${i + 1} · ${classById(a.class_id)?.name ?? "?"}${detail}`;
+  }
+
   async function repeatPrevious() {
     if (neighbours.previous === null) return;
     try {
@@ -578,6 +780,15 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       return;
     }
     if (event.button !== 0) return;
+    if (ui.tool === "polygon") {
+      if (activeClassId() === null) {
+        ui.drag = { type: "needclass" };
+        stage.setPointerCapture(event.pointerId);
+        return;
+      }
+      addPolygonPoint(p);
+      return;
+    }
     if (ui.tool === "box") {
       if (activeClassId() === null) {
         // Do not open the dialog on press: the release would land on it and steal its focus.
@@ -590,26 +801,57 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       stage.setPointerCapture(event.pointerId);
       return;
     }
+    const vertexNode = event.target.closest?.("[data-vertex]");
+    const midNode = event.target.closest?.("[data-mid]");
     const handleNode = event.target.closest?.("[data-handle]");
     const shapeNode = event.target.closest?.("[data-id]");
+    if (vertexNode) {
+      const id = vertexNode.dataset.id;
+      const index = Number(vertexNode.dataset.vertex);
+      if (event.altKey) { deleteVertex(id, index); return; } // Alt+click removes a point
+      ui.vertex = { id, index };
+      ui.drag = { type: "vertex", id, index, start: history.present, moved: false };
+      stage.setPointerCapture(event.pointerId);
+      renderShapes();
+      return;
+    }
+    if (midNode) {
+      // Dragging an edge's midpoint inserts a new point there and moves it: one undo step for both.
+      const id = midNode.dataset.id;
+      const after = Number(midNode.dataset.mid);
+      const inserted = insertVertex(history.present, id, after, p.x, p.y, width, height);
+      ui.vertex = { id, index: after + 1 };
+      ui.preview = inserted;
+      ui.drag = { type: "vertex", id, index: after + 1, start: inserted, moved: true };
+      stage.setPointerCapture(event.pointerId);
+      renderShapes();
+      return;
+    }
     if (handleNode) {
       ui.drag = { type: "resize", id: handleNode.dataset.id, handle: handleNode.dataset.handle, start: history.present, moved: false };
       stage.setPointerCapture(event.pointerId);
     } else if (shapeNode) {
       const id = shapeNode.dataset.id;
+      ui.vertex = null;
       if (event.shiftKey) { if (ui.selection.has(id)) ui.selection.delete(id); else ui.selection.add(id); }
       else if (!ui.selection.has(id)) ui.selection = new Set([id]);
       ui.drag = { type: "move", ids: [...ui.selection], start: history.present, x0: p.x, y0: p.y, sx0: p.sx, sy0: p.sy, moved: false };
       stage.setPointerCapture(event.pointerId);
       renderAll();
-    } else if (!event.shiftKey && ui.selection.size) {
+    } else if (!event.shiftKey && (ui.selection.size || ui.vertex)) {
       ui.selection.clear();
+      ui.vertex = null;
       renderAll();
     }
   });
   listen(stage, "pointermove", (event) => {
     const p = imagePoint(event);
     updateHud(p);
+    if (ui.tool === "polygon" && ui.poly && !ui.drag) { // the rubber band follows the pointer
+      ui.poly.cursor = [Math.min(Math.max(p.x, 0), width), Math.min(Math.max(p.y, 0), height)];
+      renderShapes();
+      return;
+    }
     const drag = ui.drag;
     if (!drag) return;
     if (drag.type === "pan") {
@@ -628,6 +870,10 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     } else if (drag.type === "resize") {
       drag.moved = true;
       ui.preview = resizeAnnotationTo(drag.start, drag.id, drag.handle, p.x, p.y, width, height, minBox());
+      updateGeometry();
+    } else if (drag.type === "vertex") {
+      drag.moved = true;
+      ui.preview = moveVertex(drag.start, drag.id, drag.index, p.x, p.y, width, height);
       updateGeometry();
     }
   });
@@ -658,6 +904,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     else { ui.preview = null; renderShapes(); }
   };
   listen(stage, "pointerup", (event) => finishDrag(event, false));
+  listen(stage, "dblclick", () => { if (ui.tool === "polygon" && ui.poly && ui.poly.points.length >= 3) finishPolygon(); });
   listen(stage, "pointercancel", (event) => finishDrag(event, true));
   listen(stage, "lostpointercapture", (event) => { if (ui.drag) finishDrag(event, true); });
   listen(stage, "wheel", (event) => {
@@ -696,6 +943,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     if (key === " " && onStage) { event.preventDefault(); ui.space = true; stage.classList.add("space-pan"); return; }
     if (lower === "v") setTool("select");
     else if (lower === "b") setTool("box");
+    else if (lower === "p") setTool("polygon");
     else if (lower === "h") setTool("pan");
     else if (key === "0") fit();
     else if (key === "+" || key === "=") zoomStep(1.25);
@@ -704,11 +952,20 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     else if (lower === "d" && !event.shiftKey) go(neighbours.next);
     else if (lower === "n") go(neighbours.next_unlabelled);
     else if (lower === "e") toggleEmpty();
-    else if ((key === "Delete" || key === "Backspace") && onStage) { event.preventDefault(); deleteSelection(); }
-    else if (key === "Escape") {
+    else if ((key === "Delete" || key === "Backspace") && onStage) {
+      event.preventDefault();
+      if (ui.poly) removeLastPolygonPoint();
+      else if (ui.vertex) deleteVertex(ui.vertex.id, ui.vertex.index);
+      else deleteSelection();
+    } else if (key === "Escape") {
       if (ui.drag) finishDrag({ pointerId: -1 }, true);
+      else if (ui.poly) { ui.poly = null; renderShapes(); announce("Polygon cancelled"); }
+      else if (ui.vertex) { ui.vertex = null; renderShapes(); }
       else if (ui.selection.size) { ui.selection.clear(); renderAll(); }
-    } else if (key === "Enter" && onStage && ui.tool === "box") { event.preventDefault(); boxAtCentre(); }
+    } else if (key === "Enter" && onStage && ui.tool === "polygon") { event.preventDefault(); if (ui.poly) finishPolygon(); else polygonAtCentre(); }
+    else if (key === "Enter" && onStage && ui.tool === "box") { event.preventDefault(); boxAtCentre(); }
+    else if ((key === "[" || key === "]") && onStage) { if (stepVertex(key === "]" ? 1 : -1)) event.preventDefault(); }
+    else if (lower === "i" && onStage) { if (insertVertexAfterCurrent()) event.preventDefault(); }
     else if (key === "Tab" && event.target === stage) {
       const only = ui.selection.size === 1 ? [...ui.selection][0] : null;
       const next = cycle(history.present, only, event.shiftKey ? -1 : 1);
@@ -716,7 +973,10 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     } else if (onStage && key.startsWith("Arrow") && ui.selection.size) {
       event.preventDefault();
       const step = event.shiftKey ? NUDGE_BIG : NUDGE;
-      nudge(key === "ArrowRight" ? step : key === "ArrowLeft" ? -step : 0, key === "ArrowDown" ? step : key === "ArrowUp" ? -step : 0, event.altKey);
+      const dx = key === "ArrowRight" ? step : key === "ArrowLeft" ? -step : 0;
+      const dy = key === "ArrowDown" ? step : key === "ArrowUp" ? -step : 0;
+      if (ui.vertex && !event.altKey) nudgeVertex(dx, dy); // a selected point moves alone
+      else nudge(dx, dy, event.altKey);
     }
   });
   listen(document, "keyup", (event) => {
@@ -741,6 +1001,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       { label: "Undo", hint: "Ctrl Z", run: undo },
       { label: "Redo", hint: "Ctrl Shift Z", run: redo },
       { label: "Add a class", hint: "", run: addClass },
+      { label: "Simplify selected polygon", hint: "", run: simplifySelected },
       { label: "Repeat previous image's annotations", hint: "", run: repeatPrevious },
     ],
   });

@@ -142,6 +142,8 @@ def create_app(
             "undo_limit": config["annotations"]["undo_limit"],
             "save_debounce_ms": config["annotations"]["save_debounce_ms"],
             "min_box_px": config["annotations"]["min_box_px"],
+            "min_polygon_area_px": config["annotations"]["min_polygon_area_px"],
+            "simplify_epsilon_px": config["annotations"]["simplify_epsilon_px"],
             "max_annotations": config["annotations"]["max_per_image"],
             "filmstrip_size": config["annotations"]["filmstrip_size"],
         }

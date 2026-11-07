@@ -5,7 +5,7 @@ For each interaction it records the time from a pointer/wheel event to the next 
 
 import statistics
 
-DESCRIPTION = "performance with 200 annotations: pan, zoom, move, resize (reports numbers)"
+DESCRIPTION = "performance with 200 boxes and with 200 polygons of 12 points: pan, zoom, move, edit (reports numbers)"
 BUDGET_P95_MS = 33  # provisional: 30 fps
 
 
@@ -60,6 +60,36 @@ async def run(s):
     inside = await s.js("(() => { const r = document.querySelector('svg.overlay .shape rect').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()")
     results["move a box"] = await measure("move", lambda: many_moves(tuple(inside), (inside[0] + 120, inside[1] + 90), 60))
 
+    # ---- polygons: 200 polygons x 12 points on a second image ---------------------------------
+    import math
+
+    second = s.api.call("GET", f"/api/projects/{project}/images")[1]["items"][1]["id"]
+    polygons = []
+    for i in range(200):
+        cx, cy = 20 + (i % 20) * 38, 20 + (i // 20) * 52
+        pts = [[round(cx + 14 * math.cos(2 * math.pi * k / 12), 2), round(cy + 18 * math.sin(2 * math.pi * k / 12), 2)] for k in range(12)]
+        polygons.append({"class_id": car, "kind": "polygon", "data": {"points": pts}})
+    status, body = s.api.call("PUT", f"/api/images/{second}/annotations", {"rev": 0, "annotations": polygons, "marked_empty": False, "label_class_id": None})
+    assert status == 200, body
+    await s.goto(f"/#/projects/{project}/annotate/{second}")
+    await s.wait_for("document.querySelectorAll('svg.overlay .shape').length === 200")
+    await s.wait_for("document.querySelector('.photo').complete")
+    await s.js("""(() => { window.__lat = {}; window.__mode = 'none';
+      const stage = document.querySelector('.stage');
+      const record = () => { const t0 = performance.now(); requestAnimationFrame(() => requestAnimationFrame(() => {
+        (window.__lat[window.__mode] ||= []).push(performance.now() - t0); })); };
+      for (const type of ['pointermove', 'wheel']) stage.addEventListener(type, record, true);
+    })()""")
+    rect = await s.js("(() => { const r = document.querySelector('.stage').getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; })()")
+    cx, cy = rect[0] + rect[2] / 2, rect[1] + rect[3] / 2
+    results["zoom (200 polygons)"] = await measure("pzoom", lambda: wheel_steps(s, cx, cy))
+    await s.press("0")
+    await s.press("v")
+    inside = await s.js("(() => { const r = document.querySelector('svg.overlay .shape polygon').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()")
+    results["move a polygon"] = await measure("pmove", lambda: many_moves(tuple(inside), (inside[0] + 120, inside[1] + 90), 60))
+    await s.click(".ann-row")  # select it from the list (the moved polygon now lies under others on the canvas)
+    results["drag a point"] = await measure("pvertex", lambda: drag_first_vertex(s, many_moves))
+
     print("  interaction      events   median     p95")
     worst = 0
     for name, samples in results.items():
@@ -79,3 +109,8 @@ async def wheel_steps(s, cx, cy):
         await s.send("Input.dispatchMouseEvent", type="mouseWheel", x=cx, y=cy, deltaX=0, deltaY=-120)
     for _ in range(12):
         await s.send("Input.dispatchMouseEvent", type="mouseWheel", x=cx, y=cy, deltaX=0, deltaY=120)
+
+
+async def drag_first_vertex(s, many_moves):
+    spot = await s.js("(() => { const r = document.querySelector('svg.overlay .handle.vertex').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()")
+    await many_moves(tuple(spot), (spot[0] + 60, spot[1] + 40), 60)

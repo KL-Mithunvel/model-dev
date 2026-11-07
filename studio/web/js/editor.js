@@ -7,7 +7,9 @@
 //   label_class_id: number | null,                 // single-label classification
 // }
 
-import { moveBox, resizeBoxBy, resizeBoxTo, roundBox } from "./geometry.js";
+import {
+  clampPoint, movePolygon, moveBox, resizeBoxBy, resizeBoxTo, roundBox, roundPoints, simplifyPolygon,
+} from "./geometry.js";
 
 export const emptyState = () => ({ annotations: [], marked_empty: false, label_class_id: null });
 
@@ -76,16 +78,21 @@ export function setClass(state, ids, classId) {
   );
 }
 
-/** Move boxes by (dx, dy), clamped to the image. */
+/** Where a shape goes when translated by (dx, dy): boxes and polygons stop at the image edges. */
+function translated(annotation, dx, dy, width, height) {
+  if (annotation.kind === "box") return roundBox(moveBox(annotation.data, dx, dy, width, height));
+  if (annotation.kind === "polygon") {
+    return { points: roundPoints(movePolygon(annotation.data.points, dx, dy, width, height)) };
+  }
+  return annotation.data;
+}
+
+/** Move boxes and polygons by (dx, dy), clamped to the image. */
 export function moveAnnotations(state, ids, dx, dy, width, height) {
   const target = isTarget(ids);
   return withAnnotations(
     state,
-    state.annotations.map((a) =>
-      target(a) && a.kind === "box"
-        ? { ...a, data: roundBox(moveBox(a.data, dx, dy, width, height)) }
-        : a,
-    ),
+    state.annotations.map((a) => (target(a) ? { ...a, data: translated(a, dx, dy, width, height) } : a)),
   );
 }
 
@@ -121,7 +128,7 @@ export function duplicateAnnotations(state, ids, newId, offset, width, height) {
   const copies = state.annotations.filter(target).map((a) => ({
     ...structuredClone(a),
     id: newId(),
-    data: a.kind === "box" ? roundBox(moveBox(a.data, offset, offset, width, height)) : structuredClone(a.data),
+    data: translated(a, offset, offset, width, height),
   }));
   return {
     state: withAnnotations(state, [...state.annotations, ...copies], { marked_empty: false }),
@@ -173,4 +180,52 @@ export function dropUnknownClasses(state, validClassIds) {
     annotations: state.annotations.filter((a) => validClassIds.has(a.class_id)),
     label_class_id: validClassIds.has(state.label_class_id) ? state.label_class_id : null,
   };
+}
+
+// ---- polygons -------------------------------------------------------------------------------
+
+export function addPolygon(state, id, classId, points) {
+  return addAnnotation(state, { id, class_id: classId, kind: "polygon", data: { points: roundPoints(points) } });
+}
+
+const mapPolygon = (state, id, change) =>
+  withAnnotations(
+    state,
+    state.annotations.map((a) => (a.id === id && a.kind === "polygon" ? { ...a, data: { points: roundPoints(change(a.data.points)) } } : a)),
+  );
+
+/** Move one vertex to (x, y), kept inside the image. */
+export function moveVertex(state, id, index, x, y, width, height) {
+  return mapPolygon(state, id, (points) =>
+    points.map((point, i) => (i === index ? clampPoint(x, y, width, height) : point)),
+  );
+}
+
+/** Insert a new vertex after vertex `afterIndex` (between it and the next one). */
+export function insertVertex(state, id, afterIndex, x, y, width, height) {
+  return mapPolygon(state, id, (points) => [
+    ...points.slice(0, afterIndex + 1),
+    clampPoint(x, y, width, height),
+    ...points.slice(afterIndex + 1),
+  ]);
+}
+
+/** Remove a vertex. A polygon needs 3 points: with 3 left the state is returned unchanged. */
+export function removeVertex(state, id, index) {
+  const polygon = state.annotations.find((a) => a.id === id && a.kind === "polygon");
+  if (!polygon || polygon.data.points.length <= 3) return state;
+  return mapPolygon(state, id, (points) => points.filter((_, i) => i !== index));
+}
+
+/**
+ * Drop points closer than `epsilon` pixels to the simplified outline.
+ * Returns { state, before, after } (the same state object when nothing could be removed).
+ */
+export function simplifyAnnotation(state, id, epsilon) {
+  const polygon = state.annotations.find((a) => a.id === id && a.kind === "polygon");
+  if (!polygon) return { state, before: 0, after: 0 };
+  const before = polygon.data.points.length;
+  const reduced = simplifyPolygon(polygon.data.points, epsilon);
+  if (reduced.length >= before) return { state, before, after: before };
+  return { state: mapPolygon(state, id, () => reduced), before, after: reduced.length };
 }

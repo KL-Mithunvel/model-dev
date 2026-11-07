@@ -14,7 +14,11 @@ export const SHORTCUTS = [
 ];
 
 export const ANNOTATOR_SHORTCUTS = [
-  ["Select / Box / Pan tool", ["V", "B", "H"]],
+  ["Select / Box / Polygon / Pan tool", ["V", "B", "P", "H"]],
+  ["Polygon: add points, close it", ["click", "first point / Enter / double-click"]],
+  ["Polygon: remove last point, cancel", ["Backspace", "Esc"]],
+  ["Polygon: select a point, add a point after it", ["[ ]", "I"]],
+  ["Polygon: remove the selected point", ["Delete", "Alt+click"]],
   ["Pan with the mouse", ["Space", "drag"]],
   ["Zoom / fit", ["scroll", "0"]],
   ["Previous / next image", ["A", "D"]],

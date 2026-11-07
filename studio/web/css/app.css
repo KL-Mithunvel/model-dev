@@ -176,9 +176,9 @@ dialog::backdrop { background: var(--scrim); }
 kbd { font: var(--fs-12) var(--font); background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 0 var(--sp-1); min-width: 1.4em; text-align: center; display: inline-block; }
 .shortcuts { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-2) var(--sp-4); align-items: center; }
 #toasts { pointer-events: none; position: fixed; bottom: var(--sp-4); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: var(--sp-2); z-index: 200; align-items: center; }
-.toast { pointer-events: auto; background: var(--text); color: var(--bg); padding: var(--sp-2) var(--sp-4); border-radius: var(--radius-card); box-shadow: var(--shadow-2); display: flex; align-items: center; gap: var(--sp-3); }
+.toast { pointer-events: none; background: var(--text); color: var(--bg); padding: var(--sp-2) var(--sp-4); border-radius: var(--radius-card); box-shadow: var(--shadow-2); display: flex; align-items: center; gap: var(--sp-3); }
 .toast.error { background: var(--danger); color: var(--on-accent); }
-.toast button { background: transparent; border: 0; color: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; }
+.toast button { pointer-events: auto;  background: transparent; border: 0; color: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; }
 .progress { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
 .progress > div { height: 100%; background: var(--accent); width: 0; transition: width var(--motion); }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: var(--sp-3); }
@@ -210,3 +210,4 @@ a.btn, a.nav-item, a.skip { text-decoration: none; }
 .tile .badge-right { left: auto; right: var(--sp-1); }
 .tile .badge svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2; }
 .shortcuts-head { grid-column: 1 / -1; font-size: var(--fs-13); color: var(--text-2); margin-top: var(--sp-2); }
+.toast .toast-close { text-decoration: none; font-size: var(--fs-17); line-height: 1; padding: 0 var(--sp-1); }

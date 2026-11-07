@@ -98,7 +98,7 @@ python tools\compute_survey.py      # CPU / RAM / disk / GPU survey
 ```powershell
 python tools\dev_run.py list                       # scenarios in tools\scenarios\
 python tools\dev_run.py run smoke                  # VISIBLE Edge window, watchable pace (default)
-python tools\dev_run.py run annotate_flow --headless   # also: annotate, annotate_gallery, annotate_robust, annotate_perf
+python tools\dev_run.py run annotate_flow --headless   # also: annotate, annotate_gallery, annotate_robust, annotate_polygon, annotate_perf
 python tools\dev_run.py run smoke --headless       # no window, full speed (quick checks / CI-style)
 python tools\dev_run.py run tour --pace 1.5        # narrated demo, slower
 python tools\dev_run.py open                       # app + demo data + browser for YOU; Ctrl+C stops all
@@ -122,7 +122,7 @@ Keep the server bound to `127.0.0.1`: it reads the folders you name in the impor
 
 ## Architecture
 
-Status: **v0.2 in review** (v0.1 + annotation backend and the box/classification annotator). Later stages: `docs/PLAN.md`.
+Status: **v0.3 built** (v0.2 = boxes + classification, tagged; v0.3 adds polygons). Later stages: `docs/PLAN.md`.
 
 | Path | Role |
 |------|------|
@@ -161,7 +161,8 @@ Browser (studio/web) --HTTP/WebSocket--> FastAPI (api/app.py) --> repo.py --> SQ
 - **`api.app.create_app(config=None, allowed_hosts=None)`** — routes are listed in `/docs` when running. Errors are `{"detail": "<readable message>"}`.
 - **`jobs.JobManager(keep_finished)`** — `submit(fn, kind, project_id=None) -> job_id` where `fn(progress, cancelled)`; `get`, `cancel(job_id)`, `has_active(project_id)`; a failing job never kills the worker; finished jobs are pruned. `POST /api/jobs/{id}/cancel` asks an import to stop before its next file; what was imported is kept and the report has `cancelled: true`. A project cannot be deleted while it has an active import (409).
 - **Import robustness** — a bad zip member (clash, duplicate name, too long, encrypted) is reported and skipped; a per-file exception is counted as `corrupt` and the import continues; a database error aborts but the batch row keeps the counts so far; symlinks/junctions are not followed and are reported as ignored. `GET /api/limits` exposes name/tag/page limits so the UI never hard-codes them.
-- **Frontend rules:** all text is inserted via `textContent`/`el()` (never `innerHTML`) because file names come from disk. Never pass `null` to `append`/`replaceChildren` (it prints "null"). Never rebuild a control the user is operating without restoring focus (`rebuild()` in `annotate.js` keys elements with `data-fk`). Never open a dialog on pointer-**down** (the release lands on it and steals focus); open it on release. The toast container is click-through (`pointer-events: none`) so it can never block the page beneath it; at most 3 toasts are shown.
+- **Frontend rules:** all text is inserted via `textContent`/`el()` (never `innerHTML`) because file names come from disk. Never pass `null` to `append`/`replaceChildren` (it prints "null"). Never rebuild a control the user is operating without restoring focus (`rebuild()` in `annotate.js` keys elements with `data-fk`). Never open a dialog on pointer-**down** (the release lands on it and steals focus); open it on release. The toast container AND the toast bodies are click-through (`pointer-events: none`; only the action and ✕ buttons take clicks) because toasts can cover the bottom of the canvas where users draw; at most 3 toasts are shown and every toast has a ✕.
+- **Polygons (v0.3):** a polygon is `data.points = [[x, y], ...]` (>= 3 points, implicitly closed, hole-free). Drawn by clicking; closed by clicking the first point, Enter, or a double-click; Backspace / Ctrl+Z remove the last point while drawing; Esc cancels. When selected it shows corner handles (drag to move a point; Alt+click or Delete removes the selected point, never below 3) and small midpoint handles (drag to insert a point there: one undo step). Keyboard only: `P`, `Enter` drops a hexagon, `[` / `]` pick a point, arrows move it, `I` inserts after it. "Simplify polygon" runs Ramer-Douglas-Peucker with `annotations.simplify_epsilon_px` (never below 3 points; the toast has Undo). A polygon whose edges cross is allowed but flagged ("crosses itself" in the list and a toast); a polygon with (almost) zero area is refused by both browser and server (`min_polygon_area_px`). Pure logic: `geometry.js` (area, bounds, rigid move, point-in-polygon, nearest edge, self-intersection, simplify) and `editor.js` (`addPolygon`, `moveVertex`, `insertVertex`, `removeVertex`, `simplifyAnnotation`), tested in `tests/js/polygon.test.mjs`.
 - **Annotator saving (single path):** all sends go through `saver.js`; leaving the page calls `saver.flushNow({keepalive: true})` (never a separate request: that produced a false 409 and stopped saving). After a conflict, edits still go to the draft. A 4xx other than 409/408/429 is *rejected* (shown with the server's reason, not retried; the next edit tries again).
 - **Annotator saving:** every edit writes a synchronous `localStorage` draft (`studio.draft.<imageId>`) and schedules a debounced replace-all `PUT` with the revision; the draft is removed after a successful save and offered back ("Restore") if the tab died first; a `pagehide` `keepalive` request sends anything still pending; a revision conflict (409) shows a banner with "Load the latest" / "Keep my version".
 
@@ -223,6 +224,9 @@ _Not yet filled — update before the first session._
 ---
 
 ## Known Technical Debt
+
+- **Polygons are hole-free and may cross themselves.** Self-crossing shapes are flagged but accepted (the server only rejects near-zero area). Exporters in Stage 3 must decide how to rasterise or reject them.
+- **Midpoint handles are hidden above 150 points** per polygon (too many to be useful); use Simplify or the keyboard (`I`) there. Polygon labels sit at the bounding box's top-left corner and can overlap neighbours.
 
 - **Class-name uniqueness is case-insensitive for ASCII only** (`COLLATE NOCASE`); "Éa" and "éa" can both exist. Fix with a normalised column when classes are exported.
 - **Palette contrast**: 9 of the 12 class colours are below 3:1 against the panel background in at least one theme (measured in the v0.2 review). Mitigated, not solved: every swatch/dot has a 1 px ring in `--text-2`, class names always accompany colours, and box labels are white with a black outline (21:1). Revisit with per-theme palette variants.

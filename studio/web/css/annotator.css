@@ -85,3 +85,10 @@
   .annotator { grid-template-columns: 52px minmax(0, 1fr); grid-template-rows: minmax(260px, 1fr) 76px auto; height: auto; min-height: 100%; }
   .a-inspector { grid-column: 1 / span 2; grid-row: 3; border-left: 0; border-top: 1px solid var(--border); }
 }
+
+/* polygon editing */
+.overlay .handle.vertex.active { fill: var(--accent); }
+.overlay .handle.mid { fill: var(--surface); stroke: var(--accent); opacity: 0.85; }
+.overlay .poly-dot { stroke: var(--surface); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+.overlay .poly-dot.close-target { stroke: var(--text); }
+.overlay .poly-dot.hot { stroke: var(--accent); stroke-width: 3px; }

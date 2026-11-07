@@ -33,6 +33,7 @@ const ICONS = {
   x: "M6 6l12 12M18 6 6 18",
   image: "M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M9 9h.01",
   cursor: "M5 3l14 7-6 2-2 6z",
+  polygon: "M12 3l8 6-3 11H7L4 9z",
   box: "M4 5h16v14H4z",
   move: "M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3",
   undo: "M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3",
@@ -88,10 +89,12 @@ export function toast(message, { error = false, actionLabel = null, onAction = n
       }),
     );
   }
+  // The toast body lets clicks through to the page underneath (it can cover the bottom of the
+  // canvas); only its buttons take clicks. Every toast can be dismissed with the x button.
+  node.append(el("button", { type: "button", class: "toast-close", "aria-label": "Dismiss", text: "×", onclick: () => node.remove() }));
   host.append(node);
   while (host.children.length > 3) host.firstElementChild.remove(); // never let toasts pile up over the page
-  if (!error) setTimeout(() => node.remove(), 5000); // errors stay until the next action replaces them
-  else node.addEventListener("click", () => node.remove());
+  if (!error) setTimeout(() => node.remove(), 5000); // errors stay until dismissed or pushed out
   return node;
 }
 

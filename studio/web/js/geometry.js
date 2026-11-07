@@ -118,3 +118,153 @@ export function visibleRect(view, stageW, stageH, imageW, imageH) {
     h: clamp(bottomRight.y, 0, imageH) - top,
   };
 }
+
+// ---- polygons -------------------------------------------------------------------------------
+// A polygon is an array of [x, y] points (at least 3), implicitly closed.
+
+export const roundPoints = (points) => points.map(([x, y]) => [round2(x), round2(y)]);
+
+export function polygonBounds(points) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const [x, y] of points) {
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
+}
+
+/** Shoelace area (always >= 0). A bow-tie can have a small or zero area even when it is large. */
+export function polygonArea(points) {
+  let sum = 0;
+  for (let i = 0; i < points.length; i++) {
+    const [x1, y1] = points[i];
+    const [x2, y2] = points[(i + 1) % points.length];
+    sum += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(sum) / 2;
+}
+
+export const clampPoint = (x, y, width, height) => [clamp(x, 0, width), clamp(y, 0, height)];
+
+/** Translate every point by (dx, dy); the whole polygon stops at the image edges (no distortion). */
+export function movePolygon(points, dx, dy, width, height) {
+  const { minX, minY, maxX, maxY } = polygonBounds(points);
+  const safeDx = clamp(dx, -minX, width - maxX);
+  const safeDy = clamp(dy, -minY, height - maxY);
+  return points.map(([x, y]) => [x + safeDx, y + safeDy]);
+}
+
+/** Ray casting: is (x, y) inside the polygon? */
+export function pointInPolygon(x, y, points) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const [xi, yi] = points[i];
+    const [xj, yj] = points[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+export function distanceToSegment(px, py, ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lengthSquared = dx * dx + dy * dy;
+  const t = lengthSquared === 0 ? 0 : clamp(((px - ax) * dx + (py - ay) * dy) / lengthSquared, 0, 1);
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+/** The point on the polygon's outline closest to (x, y): { index, x, y, distance }, where `index`
+ *  is the segment's first vertex (the new vertex would go after it). */
+export function nearestOnPolygon(points, x, y) {
+  let best = { index: 0, x: points[0][0], y: points[0][1], distance: Infinity };
+  for (let i = 0; i < points.length; i++) {
+    const [ax, ay] = points[i];
+    const [bx, by] = points[(i + 1) % points.length];
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lengthSquared = dx * dx + dy * dy;
+    const t = lengthSquared === 0 ? 0 : clamp(((x - ax) * dx + (y - ay) * dy) / lengthSquared, 0, 1);
+    const cx = ax + t * dx;
+    const cy = ay + t * dy;
+    const distance = Math.hypot(x - cx, y - cy);
+    if (distance < best.distance) best = { index: i, x: cx, y: cy, distance };
+  }
+  return best;
+}
+
+export const midpoint = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+
+function crossProduct(a, b, c) {
+  return (c[1] - a[1]) * (b[0] - a[0]) - (b[1] - a[1]) * (c[0] - a[0]);
+}
+
+function segmentsCross(a, b, c, d) {
+  const d1 = crossProduct(a, b, c);
+  const d2 = crossProduct(a, b, d);
+  const d3 = crossProduct(c, d, a);
+  const d4 = crossProduct(c, d, b);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+
+/** True if two non-adjacent edges properly cross (a "bow-tie"). Touching at a vertex is not a crossing. */
+export function polygonSelfIntersects(points) {
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (j === i + 1 || (i === 0 && j === n - 1)) continue; // edges that share a vertex
+      if (segmentsCross(points[i], points[(i + 1) % n], points[j], points[(j + 1) % n])) return true;
+    }
+  }
+  return false;
+}
+
+function simplifyChain(chain, epsilon) {
+  if (chain.length < 3) return chain;
+  const [ax, ay] = chain[0];
+  const [bx, by] = chain[chain.length - 1];
+  let farthest = -1;
+  let farthestDistance = -1;
+  for (let i = 1; i < chain.length - 1; i++) {
+    const d = distanceToSegment(chain[i][0], chain[i][1], ax, ay, bx, by);
+    if (d > farthestDistance) { farthest = i; farthestDistance = d; }
+  }
+  if (farthestDistance <= epsilon) return [chain[0], chain[chain.length - 1]];
+  const left = simplifyChain(chain.slice(0, farthest + 1), epsilon);
+  const right = simplifyChain(chain.slice(farthest), epsilon);
+  return [...left.slice(0, -1), ...right];
+}
+
+/**
+ * Ramer-Douglas-Peucker for a closed polygon: drop points that stay within `epsilon` pixels of the
+ * simplified outline. Never returns fewer than `minPoints`; if it cannot simplify, returns the input.
+ */
+export function simplifyPolygon(points, epsilon, minPoints = 3) {
+  if (points.length <= minPoints || epsilon <= 0) return points;
+  // Split the ring at point 0 and at the point farthest from it, so both halves are open chains.
+  let split = 1;
+  let splitDistance = -1;
+  for (let i = 1; i < points.length; i++) {
+    const d = Math.hypot(points[i][0] - points[0][0], points[i][1] - points[0][1]);
+    if (d > splitDistance) { split = i; splitDistance = d; }
+  }
+  const first = simplifyChain(points.slice(0, split + 1), epsilon);
+  const second = simplifyChain([...points.slice(split), points[0]], epsilon);
+  const result = [...first.slice(0, -1), ...second.slice(0, -1)];
+  return result.length >= minPoints ? result : points;
+}
+
+/** A regular polygon with `sides` corners centred at (cx, cy), covering about `fraction` of the view. */
+export function defaultPolygon(cx, cy, visibleW, visibleH, width, height, sides = 6, fraction = 0.25) {
+  const radius = Math.max(2, (Math.min(visibleW, visibleH) * Math.sqrt(fraction)) / 2);
+  const points = [];
+  for (let i = 0; i < sides; i++) {
+    const angle = (2 * Math.PI * i) / sides - Math.PI / 2;
+    points.push([cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)]);
+  }
+  return movePolygon(points, 0, 0, width, height).map(([x, y]) => clampPoint(x, y, width, height));
+}

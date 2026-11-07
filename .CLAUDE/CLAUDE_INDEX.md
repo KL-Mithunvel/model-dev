@@ -26,7 +26,7 @@ Master index of all documents in this `.CLAUDE/` library. Every new project-base
 |------|------|-----------|
 | [../tools/compute_survey.py](../tools/compute_survey.py) | Compute survey (CPU, RAM, disk, GPU) — used by the "Survey the environment" preflight gate | Before compute-heavy development in any project |
 | [../tools/dev_run.py](../tools/dev_run.py) | Run the app in a real (visible) browser and drive it with real mouse/keyboard; scenarios in `tools/scenarios/`; library in `tools/devbrowser.py` | Every UI change; before tagging; to watch or demo the app |
-| [../tools/scenarios/](../tools/scenarios/) | Browser scenarios: `smoke`, `tour`, `annotate`, `annotate_flow`, `annotate_gallery`, `annotate_robust`, `annotate_perf` | Before tagging; add a check per UI bug fixed |
+| [../tools/scenarios/](../tools/scenarios/) | Browser scenarios: `smoke`, `tour`, `annotate`, `annotate_flow`, `annotate_gallery`, `annotate_robust`, `annotate_polygon`, `annotate_perf` | Before tagging; add a check per UI bug fixed |
 | [../tools/ui_smoke.py](../tools/ui_smoke.py) | Shim for `dev_run.py run smoke --headless` | Old habit / quick headless check |
 | [../.gitignore](../.gitignore) | Baseline ignore list — venvs, `.env`, `data/`, IDE and OS files | Copying into a new project |
 

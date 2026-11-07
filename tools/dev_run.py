@@ -4,6 +4,7 @@
     python tools/dev_run.py run smoke                 # visible browser, watchable pace
     python tools/dev_run.py run smoke --headless      # no window, full speed (for quick checks)
     python tools/dev_run.py run tour --pace 1.5       # slower, for demos
+    python tools/dev_run.py run path/to/my_scenario.py   # a scenario file from anywhere
     python tools/dev_run.py open                      # start the app with demo data and open it
                                                       # for YOU to use; Ctrl+C stops everything
 
@@ -28,10 +29,12 @@ SCENARIOS = TOOLS / "scenarios"
 
 
 def load_scenario(name: str):
-    path = SCENARIOS / f"{name}.py"
+    """A scenario by name (tools/scenarios/<name>.py) or by path to any .py file."""
+    given = Path(name)
+    path = given if given.suffix == ".py" and given.is_file() else SCENARIOS / f"{name}.py"
     if not path.is_file():
         raise DevRunError(f"No scenario named '{name}'. Try: python tools/dev_run.py list")
-    spec = importlib.util.spec_from_file_location(f"scenario_{name}", path)
+    spec = importlib.util.spec_from_file_location(f"scenario_{path.stem}", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -50,7 +53,7 @@ async def run_scenario(args) -> int:
     module = load_scenario(args.scenario)
     print(f"Scenario '{args.scenario}': {getattr(module, 'DESCRIPTION', '')}")
     async with Session(headed=not args.headless, pace=args.pace, browser=args.browser,
-                       config=getattr(module, "CONFIG", None), label=args.scenario) as session:
+                       config=getattr(module, "CONFIG", None), label=Path(args.scenario).stem) as session:
         try:
             await module.run(session)
         except DevRunError as error:

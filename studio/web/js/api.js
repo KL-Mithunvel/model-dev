@@ -14,13 +14,14 @@ function readableDetail(detail, status) {
   return status >= 500 ? "Something went wrong on the server." : "The request could not be completed.";
 }
 
-export async function api(path, { method = "GET", body } = {}) {
+export async function api(path, { method = "GET", body, keepalive = false } = {}) {
   let response;
   try {
     response = await fetch(path, {
       method,
       headers: body === undefined ? {} : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
+      keepalive, // lets the request finish while the page is being closed
     });
   } catch {
     throw new ApiError("Cannot reach the app. Is it still running?", 0);

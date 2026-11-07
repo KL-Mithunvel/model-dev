@@ -18,7 +18,13 @@ class AnnotationError(ValueError):
 
 
 def _number(value: Any, what: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise AnnotationError(f"{what} must be a finite number.")
+    try:
+        finite = math.isfinite(value)  # raises OverflowError for integers beyond float range
+    except OverflowError:
+        finite = False
+    if not finite:
         raise AnnotationError(f"{what} must be a finite number.")
     return float(value)
 

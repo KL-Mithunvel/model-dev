@@ -30,7 +30,8 @@
 - [x] Browser driver `tools/dev_run.py` (option A: own CDP driver, visible by default, real input, on-page cursor) built and verified: smoke 16/16 visible and headless; tour 4/4.
 - [x] Stage 2 plan approved by owner 2026-11-07 (single-label, explicit "no objects", key map as proposed); written into `docs/PLAN.md`.
 - [x] Stage 2 v0.2 built: 2.1 backend (8e26bed), pure modules (8e10f84), annotator view, gallery integration; 123 pytest, 37 Node tests, 5 browser scenarios passing.
-- [ ] v0.2: independent review (stricter, includes frontend), fix findings, then ask the owner to approve the `v0.2` tag.
+- [x] v0.2 independent review done (FAIL: 1 blocker + 8 should-fix); all fixed and re-verified (see PLAN.md). A second review pass of the fixes was not run.
+- [ ] v0.2: owner approval of the `v0.2` tag.
 - [ ] Stage 2 v0.3 (polygons) and v0.4 (keypoints): after v0.2 is tagged.
 - [ ] dev_run: pace default for visible runs was chosen by me (1.0, `--pace 0` for instant) because the owner did not answer; confirm or change.
 - [ ] v0.1 follow-ups (technical debt in CLAUDE.md): parallel import, move browser checks into a real test runner, `httpx2` for the test client (install was blocked), orphan-file sweeper.

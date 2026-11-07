@@ -109,7 +109,7 @@ async def run(s):
     await s.press("Ctrl+z")
     await saved(s)
     s.check("undo restores the exact earlier position",
-            stored(s, first)["annotations"][0]["data"] == resized or near(stored(s, first)["annotations"][0]["data"]["y"], resized["y"] + 0, 0.5))
+            stored(s, first)["annotations"][0]["data"] == resized)
     await s.press("Ctrl+Shift+z")
     await saved(s)
     s.check("redo brings the nudge back", stored(s, first)["annotations"][0]["data"] == nudged)

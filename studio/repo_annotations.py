@@ -49,7 +49,7 @@ def clean_class_name(name: str, max_length: int) -> str:
 
 
 def clean_color(color: str) -> str:
-    if not COLOR_PATTERN.match(color):
+    if not COLOR_PATTERN.fullmatch(color):
         raise ValueError("Colour must look like #RRGGBB.")
     return color.upper()
 
@@ -95,13 +95,12 @@ def create_class(
     conn: sqlite3.Connection, project_id: int, name: str, color: str | None, palette: Sequence[str]
 ) -> dict[str, Any]:
     """Create a class. Without ``color`` the first unused palette colour is taken."""
-    taken = {
-        r["color"].upper()
-        for r in conn.execute("SELECT color FROM classes WHERE project_id = ?", (project_id,))
-    }
+    rows = conn.execute("SELECT color FROM classes WHERE project_id = ?", (project_id,)).fetchall()
+    taken = {r["color"].upper() for r in rows}
     if color is None:
+        # first unused palette colour; once all are used, cycle by how many classes exist
         color = next(
-            (c for c in palette if c.upper() not in taken), palette[len(taken) % len(palette)]
+            (c for c in palette if c.upper() not in taken), palette[len(rows) % len(palette)]
         )
     position = conn.execute(
         "SELECT COALESCE(MAX(position) + 1, 0) FROM classes WHERE project_id = ?", (project_id,)
@@ -212,45 +211,42 @@ def save_annotations(
         validation.AnnotationError: invalid content (nothing is written).
         LookupError: the image does not exist.
     """
-    image = conn.execute(
-        "SELECT id, project_id, width, height, annotations_rev FROM images WHERE id = ?",
-        (image_id,),
-    ).fetchone()
-    if image is None:
-        raise LookupError(f"Image {image_id} not found.")
-    if rev != image["annotations_rev"]:
-        raise RevisionConflict(image["annotations_rev"])
-
-    validation.validate_set(items, marked_empty, limits)
-    classes = {
-        r["id"]: (json.loads(r["skeleton"]) if r["skeleton"] else None)
-        for r in conn.execute(
-            "SELECT id, skeleton FROM classes WHERE project_id = ?", (image["project_id"],)
-        )
-    }
-    if label_class_id is not None and label_class_id not in classes:
-        raise validation.AnnotationError("The image label is not a class of this project.")
-    cleaned = []
-    for index, item in enumerate(items, start=1):
-        class_id = item.get("class_id")
-        if class_id not in classes:
-            raise validation.AnnotationError(
-                f"Annotation {index}: its class is not part of this project."
-            )
-        result = validation.validate_annotation(
-            item, index, image["width"], image["height"], limits, classes[class_id]
-        )
-        cleaned.append((class_id, result["kind"], validation.dumps(result["data"])))
-
     now = utc_now()
     try:
+        # Take the write lock FIRST. Reading the revision, the project's classes and validating
+        # all happen inside it, so nothing (a class deleted, another save) can slip in between the
+        # checks and the write.
         conn.execute("BEGIN IMMEDIATE")
-        # Re-check inside the write lock: another writer may have saved since the check above.
-        current = conn.execute(
-            "SELECT annotations_rev FROM images WHERE id = ?", (image_id,)
-        ).fetchone()[0]
-        if current != rev:
-            raise RevisionConflict(current)
+        image = conn.execute(
+            "SELECT id, project_id, width, height, annotations_rev FROM images WHERE id = ?",
+            (image_id,),
+        ).fetchone()
+        if image is None:
+            raise LookupError(f"Image {image_id} not found.")
+        if rev != image["annotations_rev"]:
+            raise RevisionConflict(image["annotations_rev"])
+
+        validation.validate_set(items, marked_empty, limits)
+        classes = {
+            r["id"]: (json.loads(r["skeleton"]) if r["skeleton"] else None)
+            for r in conn.execute(
+                "SELECT id, skeleton FROM classes WHERE project_id = ?", (image["project_id"],)
+            )
+        }
+        if label_class_id is not None and label_class_id not in classes:
+            raise validation.AnnotationError("The image label is not a class of this project.")
+        cleaned = []
+        for index, item in enumerate(items, start=1):
+            class_id = item.get("class_id")
+            if class_id not in classes:
+                raise validation.AnnotationError(
+                    f"Annotation {index}: its class is not part of this project."
+                )
+            result = validation.validate_annotation(
+                item, index, image["width"], image["height"], limits, classes[class_id]
+            )
+            cleaned.append((class_id, result["kind"], validation.dumps(result["data"])))
+
         conn.execute("DELETE FROM annotations WHERE image_id = ?", (image_id,))
         conn.executemany(
             "INSERT INTO annotations (image_id, class_id, kind, data, position, created_at,"

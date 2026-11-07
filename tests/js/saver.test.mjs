@@ -172,3 +172,93 @@ test("draft helpers tolerate missing or broken storage", () => {
   const saver = createSaver({ imageId: 1, rev: 0, storage: { setItem: () => { throw new Error("quota"); }, removeItem() {} }, timers: fakeTimers(), send: async (p, r) => ({ ok: true, rev: r + 1 }) });
   assert.doesNotThrow(() => saver.edit(payload(1))); // a full disk must not break editing
 });
+
+// ---- review findings (v0.2): hiding the page, rejected saves, drafts after a conflict -------------
+
+test("flushNow (page hidden) and the debounce timer produce exactly ONE request, with the right revision", async () => {
+  const timers = fakeTimers();
+  const sent = [];
+  const saver = createSaver({ imageId: 1, rev: 7, debounceMs: 400, timers, send: async (p, rev, options) => { sent.push({ rev, options }); return { ok: true, rev: rev + 1 }; } });
+  saver.edit(payload(1));
+  await saver.flushNow({ keepalive: true }); // what the page does on visibilitychange/pagehide
+  await timers.advance(5000); // the debounce timer must not fire a second, stale request
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0], { rev: 7, options: { keepalive: true } });
+  assert.equal(saver.rev, 8);
+  assert.equal(saver.status, "saved");
+});
+
+test("an edit after hiding the page is still saved (no false conflict, saving not stopped)", async () => {
+  const timers = fakeTimers();
+  const sent = [];
+  const saver = createSaver({ imageId: 1, rev: 0, debounceMs: 100, timers, send: async (p, rev) => { sent.push([p, rev]); return { ok: true, rev: rev + 1 }; } });
+  saver.edit(payload(1));
+  await saver.flushNow({ keepalive: true });
+  saver.edit(payload(2));
+  await timers.advance(200);
+  assert.deepEqual(sent.map(([, rev]) => rev), [0, 1]);
+  assert.equal(saver.status, "saved");
+});
+
+test("flushNow while a save is already in flight does not send a duplicate", async () => {
+  const timers = fakeTimers();
+  let calls = 0;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const saver = createSaver({ imageId: 1, rev: 0, debounceMs: 10, timers, send: async (p, rev) => { calls++; await gate; return { ok: true, rev: rev + 1 }; } });
+  saver.edit(payload(1));
+  await timers.advance(20);
+  const again = saver.flushNow({ keepalive: true });
+  release();
+  await again;
+  await flushMicrotasks();
+  assert.equal(calls, 1);
+});
+
+test("after a conflict, further edits still go to the local draft (they are never silently lost)", async () => {
+  const timers = fakeTimers();
+  const storage = fakeStorage();
+  const saver = createSaver({ imageId: 4, rev: 0, timers, storage, debounceMs: 10, send: async () => ({ conflict: true, currentRev: 9 }) });
+  saver.edit(payload(1));
+  await timers.advance(20);
+  assert.equal(saver.status, "conflict");
+  saver.edit(payload(2));
+  saver.edit(payload(3));
+  assert.deepEqual(readDraft(storage, 4).payload, payload(3));
+  assert.equal(saver.hasUnsavedChanges, true);
+});
+
+test("a rejected save is reported with its reason, NOT retried, and the next edit tries again", async () => {
+  const timers = fakeTimers();
+  let calls = 0;
+  let detail = null;
+  const saver = createSaver({
+    imageId: 5, rev: 0, timers, debounceMs: 10, retryMs: [50],
+    onStatus: (s, d) => { if (s === "rejected") detail = d; },
+    send: async (p, rev) => { calls++; return calls === 1 ? { rejected: true, message: "class missing" } : { ok: true, rev: rev + 1 }; },
+  });
+  saver.edit(payload(1));
+  await timers.advance(20);
+  assert.equal(saver.status, "rejected");
+  assert.deepEqual(detail, { message: "class missing" });
+  await timers.advance(10000); // no automatic retry
+  assert.equal(calls, 1);
+  assert.equal(saver.hasUnsavedChanges, true);
+  saver.edit(payload(2)); // the user fixes something: try again
+  await timers.advance(20);
+  assert.equal(calls, 2);
+  assert.equal(saver.status, "saved");
+});
+
+test("dispose stops everything: no sends after leaving", async () => {
+  const timers = fakeTimers();
+  let calls = 0;
+  const saver = createSaver({ imageId: 1, rev: 0, timers, debounceMs: 10, send: async (p, rev) => { calls++; return { ok: true, rev: rev + 1 }; } });
+  saver.edit(payload(1));
+  saver.dispose();
+  await timers.advance(1000);
+  saver.edit(payload(2));
+  await timers.advance(1000);
+  await saver.flushNow();
+  assert.equal(calls, 0);
+});

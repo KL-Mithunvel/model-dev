@@ -98,7 +98,7 @@ python tools\compute_survey.py      # CPU / RAM / disk / GPU survey
 ```powershell
 python tools\dev_run.py list                       # scenarios in tools\scenarios\
 python tools\dev_run.py run smoke                  # VISIBLE Edge window, watchable pace (default)
-python tools\dev_run.py run annotate_flow --headless   # also: annotate, annotate_gallery, annotate_perf
+python tools\dev_run.py run annotate_flow --headless   # also: annotate, annotate_gallery, annotate_robust, annotate_perf
 python tools\dev_run.py run smoke --headless       # no window, full speed (quick checks / CI-style)
 python tools\dev_run.py run tour --pace 1.5        # narrated demo, slower
 python tools\dev_run.py open                       # app + demo data + browser for YOU; Ctrl+C stops all
@@ -162,6 +162,7 @@ Browser (studio/web) --HTTP/WebSocket--> FastAPI (api/app.py) --> repo.py --> SQ
 - **`jobs.JobManager(keep_finished)`** — `submit(fn, kind, project_id=None) -> job_id` where `fn(progress, cancelled)`; `get`, `cancel(job_id)`, `has_active(project_id)`; a failing job never kills the worker; finished jobs are pruned. `POST /api/jobs/{id}/cancel` asks an import to stop before its next file; what was imported is kept and the report has `cancelled: true`. A project cannot be deleted while it has an active import (409).
 - **Import robustness** — a bad zip member (clash, duplicate name, too long, encrypted) is reported and skipped; a per-file exception is counted as `corrupt` and the import continues; a database error aborts but the batch row keeps the counts so far; symlinks/junctions are not followed and are reported as ignored. `GET /api/limits` exposes name/tag/page limits so the UI never hard-codes them.
 - **Frontend rules:** all text is inserted via `textContent`/`el()` (never `innerHTML`) because file names come from disk. Never pass `null` to `append`/`replaceChildren` (it prints "null"). Never rebuild a control the user is operating without restoring focus (`rebuild()` in `annotate.js` keys elements with `data-fk`). Never open a dialog on pointer-**down** (the release lands on it and steals focus); open it on release. The toast container is click-through (`pointer-events: none`) so it can never block the page beneath it; at most 3 toasts are shown.
+- **Annotator saving (single path):** all sends go through `saver.js`; leaving the page calls `saver.flushNow({keepalive: true})` (never a separate request: that produced a false 409 and stopped saving). After a conflict, edits still go to the draft. A 4xx other than 409/408/429 is *rejected* (shown with the server's reason, not retried; the next edit tries again).
 - **Annotator saving:** every edit writes a synchronous `localStorage` draft (`studio.draft.<imageId>`) and schedules a debounced replace-all `PUT` with the revision; the draft is removed after a successful save and offered back ("Restore") if the tab died first; a `pagehide` `keepalive` request sends anything still pending; a revision conflict (409) shows a banner with "Load the latest" / "Keep my version".
 
 ---
@@ -222,6 +223,12 @@ _Not yet filled — update before the first session._
 ---
 
 ## Known Technical Debt
+
+- **Class-name uniqueness is case-insensitive for ASCII only** (`COLLATE NOCASE`); "Éa" and "éa" can both exist. Fix with a normalised column when classes are exported.
+- **Palette contrast**: 9 of the 12 class colours are below 3:1 against the panel background in at least one theme (measured in the v0.2 review). Mitigated, not solved: every swatch/dot has a 1 px ring in `--text-2`, class names always accompany colours, and box labels are white with a black outline (21:1). Revisit with per-theme palette variants.
+- **UI constants live in code, not `config.yaml`**: handle size, drag thresholds, nudge steps, retry delays, undo coalescing window (600 ms), zoom limits, `#000` label outline. They are presentation constants, not tunables of the data or hardware; documented here so they are not mistaken for oversights.
+- **Narrow screens**: below 900 px the inspector moves under the canvas and the canvas gets small (about 266 px tall at an 800 px high window). Acceptable for a desktop tool; revisit if tablets matter.
+- **Process deviation recorded**: in the v0.2 series the backend (8e26bed) and the pure modules (8e10f84) were committed before their docs/index/log entries (ff8ca43). The end state is documented; future steps keep docs in the same commit.
 
 - **Import speed is I/O-bound**: ~36 images/s on 1024×768 JPEGs (2,000 in 55.8 s, measured 2026-11-06, synthetic fresh files). One file at a time. Parallel read/decode (threads) is the next lever if datasets grow beyond a few thousand.
 - **Startup migration runs once at `create_app`**, not per process start of workers; fine for one process, revisit with Stage 8 workers.

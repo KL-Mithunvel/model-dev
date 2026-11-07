@@ -173,3 +173,26 @@ export function isTyping(target) {
   const tag = target.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
 }
+
+// ---- radio groups: one Tab stop, arrow keys move and select (WAI-ARIA radio group pattern) ---
+export function rovingTabindex(group) {
+  if (!group) return;
+  const items = [...group.querySelectorAll('[role="radio"]')];
+  const checked = items.find((item) => item.getAttribute("aria-checked") === "true") ?? items[0];
+  for (const item of items) item.tabIndex = item === checked ? 0 : -1;
+}
+
+export function enableRadioArrows(group) {
+  if (!group) return;
+  const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+  group.addEventListener("keydown", (event) => {
+    if (!(event.key in step)) return;
+    const items = [...group.querySelectorAll('[role="radio"]')];
+    const index = items.indexOf(document.activeElement);
+    if (index < 0) return;
+    event.preventDefault();
+    const next = items[(index + step[event.key] + items.length) % items.length];
+    next.focus();
+    next.click();
+  });
+}

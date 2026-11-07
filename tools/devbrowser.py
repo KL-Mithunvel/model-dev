@@ -200,6 +200,7 @@ class Session:
         self.window = window
         self.results: list[tuple[str, bool]] = []
         self.problems: list[str] = []
+        self.expected_console: list[str] = []  # substrings of console errors a scenario causes on purpose
         self.cursor = (60.0, 60.0)
         self.work = Path(tempfile.mkdtemp(prefix="studio_dev_run_"))
         stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -246,14 +247,17 @@ class Session:
         deep_merge(config, self.config_overrides)
         config_path = self.work / "dev.yaml"
         config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
-        self._server = subprocess.Popen(
-            [sys.executable, "-m", "studio", "--config", str(config_path)], cwd=REPO,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        self._server_log = self.work / "server.log"
+        with self._server_log.open("wb") as log:  # kept so a start-up failure can be explained
+            self._server = subprocess.Popen(
+                [sys.executable, "-m", "studio", "--config", str(config_path)], cwd=REPO,
+                stdout=log, stderr=log,
+            )
         self.base = f"http://127.0.0.1:{port}"
         for _ in range(80):
             if self._server.poll() is not None:
-                raise DevRunError("The app server exited during start-up.")
+                tail = self._server_log.read_text(errors="replace")[-800:]
+                raise DevRunError(f"The app server exited during start-up:\n{tail}")
             try:
                 urllib.request.urlopen(f"{self.base}/api/health", timeout=1)
                 break
@@ -365,7 +369,8 @@ class Session:
                 entry = message["params"]["entry"]
                 # 409 is part of the API contract (save conflict, "class is in use"); the browser
                 # logs it as an error but the app handles it, so it is not a problem.
-                if "status of 409" not in entry["text"]:
+                expected = any(pattern in entry["text"] for pattern in self.expected_console)
+                if "status of 409" not in entry["text"] and not expected:
                     self.problems.append("console: " + entry["text"] + " " + entry.get("url", ""))
             if message.get("id") == mid:
                 if "error" in message:
@@ -379,6 +384,10 @@ class Session:
             self.problems.append("eval: " + expression[:70] + " -> " + str(result["exceptionDetails"])[:200])
             return None
         return result.get("result", {}).get("value")
+
+    def expect_console(self, *patterns: str) -> None:
+        """Declare console errors this scenario causes on purpose (for example a deliberate 400)."""
+        self.expected_console.extend(patterns)
 
     # ---- narration, pacing, checks ------------------------------------------------------------
     async def pause(self, seconds: float) -> None:

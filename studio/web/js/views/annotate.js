@@ -12,7 +12,7 @@ import { HANDLES, boxFromPoints, defaultBox, fitView, handlePoint, panBy, screen
 import { createHistory } from "../history.js";
 import { limits } from "../limits.js";
 import { clearDraft, createSaver, readDraft } from "../saver.js";
-import { el, icon, isTyping, plural, toast } from "../ui.js";
+import { el, enableRadioArrows, icon, isTyping, plural, rovingTabindex, toast } from "../ui.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const HANDLE_SIZE_PX = 10; // size of a resize handle on screen, whatever the zoom
@@ -21,7 +21,7 @@ const DRAG_START_PX = 3; // a press must move this far before it moves a shape
 const NUDGE = 1;
 const NUDGE_BIG = 10;
 const CURSORS = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize" };
-const STATUS_TEXT = { saved: "Saved", saving: "Saving…", dirty: "Unsaved changes", error: "Couldn’t save – retrying", conflict: "Changed elsewhere" };
+const STATUS_TEXT = { saved: "Saved", saving: "Saving…", dirty: "Unsaved changes", error: "Couldn’t save – retrying", conflict: "Changed elsewhere", rejected: "Couldn’t save – see message" };
 
 const svgEl = (tag, attrs = {}) => {
   const node = document.createElementNS(SVG_NS, tag);
@@ -73,7 +73,9 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   container.replaceChildren(
     el("div", { class: "annotator" }, toolstrip, el("div", { class: "stage-wrap" }, banner, stage, hud), inspector, filmstrip, live),
   );
-  const statusChip = el("span", { class: "chip save-chip", role: "status", "data-status": "saved", text: STATUS_TEXT.saved });
+  // not a live region: it changes on every edit, which would be chatty. Problems are announced instead.
+  const statusChip = el("span", { class: "chip save-chip", "data-status": "saved", text: STATUS_TEXT.saved });
+  let statusBanner = false; // a banner that explains a save problem (hidden again once saved)
 
   const announce = (text) => { live.textContent = ""; setTimeout(() => { live.textContent = text; }, 30); };
   const showBanner = (message, actions = []) => {
@@ -103,14 +105,22 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
         statusChip.textContent = STATUS_TEXT[status] ?? status;
         statusChip.dataset.status = status;
         if (status === "conflict") offerConflictChoice(detail);
+        else if (status === "rejected") offerRejectedChoice(detail);
+        else if (status === "saved" && statusBanner) { hideBanner(); statusBanner = false; }
+        if (status === "error" || status === "conflict" || status === "rejected") announce(STATUS_TEXT[status]);
       },
-      send: async (payload, sendRev) => {
+      send: async (payload, sendRev, options = {}) => {
         try {
-          const result = await api(`/api/images/${imageId}/annotations`, { method: "PUT", body: { ...payload, rev: sendRev } });
+          const result = await api(`/api/images/${imageId}/annotations`, { method: "PUT", body: { ...payload, rev: sendRev }, keepalive: Boolean(options.keepalive) });
           return { ok: true, rev: result.rev };
         } catch (error) {
           if (error instanceof ApiError && error.status === 409 && error.data?.current_rev !== undefined) {
             return { conflict: true, currentRev: error.data.current_rev };
+          }
+          // The server understood and refused the content (for example a class that no longer exists).
+          // Retrying the same request can never help, so report it instead of retrying forever.
+          if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+            return { rejected: true, message: error.message };
           }
           throw error;
         }
@@ -328,10 +338,18 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     });
   }
 
+  function wireRadioGroups() {
+    for (const group of inspector.querySelectorAll(".radio-list")) {
+      rovingTabindex(group);
+      enableRadioArrows(group);
+    }
+  }
+
   function renderFilmstrip(items) {
     filmstrip.replaceChildren(
-      ...items.map((item) => el("button", { class: "film-item", type: "button", role: "listitem", "aria-label": `${item.original_name}${item.id === imageId ? " (current)" : ""}`, ...(item.id === imageId ? { "aria-current": "true" } : {}), "data-id": String(item.id), "data-labelled": String(item.annotation_count > 0 || item.marked_empty || item.label_class_id !== null), onclick: () => go(item.id) },
-        el("img", { src: item.thumb_url, alt: "", draggable: "false", loading: "lazy" }))),
+      ...items.map((item) => el("div", { role: "listitem", class: "film-cell" },
+        el("button", { class: "film-item", type: "button", "aria-label": `${item.original_name}${item.id === imageId ? " (current)" : ""}`, ...(item.id === imageId ? { "aria-current": "true" } : {}), "data-id": String(item.id), "data-labelled": String(item.annotation_count > 0 || item.marked_empty || item.label_class_id !== null), onclick: () => go(item.id) },
+          el("img", { src: item.thumb_url, alt: "", draggable: "false", loading: "lazy" })))),
     );
     filmstrip.querySelector("[aria-current]")?.scrollIntoView({ inline: "center", block: "nearest" });
   }
@@ -354,6 +372,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     renderShapes();
     renderToolstrip();
     renderInspector();
+    wireRadioGroups();
     updateFilmDot();
   }
 
@@ -393,6 +412,11 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     toast("Add a class first, then draw.", { error: true });
     addClass();
   }
+  function canAdd(count = 1) {
+    if (history.present.annotations.length + count <= limits.max_annotations) return true;
+    toast(`An image can have at most ${limits.max_annotations} annotations.`, { error: true });
+    return false;
+  }
   function deleteIds(ids) {
     if (!ids.length) return;
     commit(deleteAnnotations(history.present, ids));
@@ -400,7 +424,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   }
   function deleteSelection() { deleteIds([...ui.selection]); }
   function duplicateSelection() {
-    if (!ui.selection.size) return;
+    if (!ui.selection.size || !canAdd(ui.selection.size)) return;
     const { state, ids } = duplicateAnnotations(history.present, [...ui.selection], newId, 10, width, height);
     commit(state);
     ui.selection = new Set(ids);
@@ -442,6 +466,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   function boxAtCentre() {
     const classId = activeClassId();
     if (classId === null) { needClass(); return; }
+    if (!canAdd()) return;
     const r = stageRect();
     const visible = visibleRect(ui.view, r.width, r.height, width, height);
     const box = defaultBox(visible.x + visible.w / 2, visible.y + visible.h / 2, visible.w, visible.h, width, height);
@@ -457,6 +482,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       const previous = await api(`/api/images/${neighbours.previous}/annotations`);
       const { state, ids } = appendFromServer(history.present, previous, newId, new Set(classes.map((c) => c.id)));
       if (!ids.length) { toast("The previous image has no annotations to copy."); return; }
+      if (!canAdd(ids.length)) return;
       commit(state);
       ui.selection = new Set(ids);
       renderAll();
@@ -485,8 +511,9 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
 
   // ---- saving: recovery and conflicts -------------------------------------------------------
   function offerConflictChoice() {
+    statusBanner = true;
     showBanner("This image was changed somewhere else, for example in another tab.", [
-      { label: "Load the latest version", onClick: async () => { await loadServerState(); hideBanner(); renderAll(); } },
+      { label: "Load the latest version", onClick: async () => { clearDraft(storage, imageId); await loadServerState(); hideBanner(); statusBanner = false; renderAll(); } },
       { label: "Keep my version", onClick: async () => {
         const latest = await api(`/api/images/${imageId}/annotations`);
         const mine = toPayload(history.present);
@@ -494,6 +521,16 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
         saver.edit(mine);
         hideBanner();
       } },
+    ]);
+  }
+  function offerRejectedChoice(detail) {
+    statusBanner = true;
+    showBanner(`The server did not accept these changes: ${detail.message}`, [
+      { label: "Remove annotations that no longer fit", onClick: async () => {
+        classes = await api(`/api/projects/${projectId}/classes`);
+        commit(dropUnknownClasses(history.present, new Set(classes.map((c) => c.id))));
+      } },
+      { label: "Load the latest version", onClick: async () => { clearDraft(storage, imageId); await loadServerState(); hideBanner(); statusBanner = false; renderAll(); } },
     ]);
   }
   function offerDraftRestore() {
@@ -510,15 +547,13 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       { label: "Discard them", onClick: () => { clearDraft(storage, imageId); hideBanner(); } },
     ]);
   }
-  const sendOnHide = () => {
-    const pending = saver?.takePendingForBeacon();
-    if (!pending) return;
-    try {
-      fetch(`/api/images/${imageId}/annotations`, { method: "PUT", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...pending, rev: saver.currentRev }) }).catch(() => {});
-    } catch { /* the local draft still holds the edit */ }
-  };
-  listen(document, "visibilitychange", () => { if (document.visibilityState === "hidden") sendOnHide(); });
+  // Leaving the page (tab hidden, window closing) sends the pending edit through the SAME saver, so
+  // there is never a second request carrying a stale revision (that produced a false conflict).
+  const releaseKeys = () => { ui.space = false; stage.classList.remove("space-pan"); };
+  const sendOnHide = () => { void saver?.flushNow({ keepalive: true }); };
+  listen(document, "visibilitychange", () => { if (document.visibilityState === "hidden") { sendOnHide(); releaseKeys(); } });
   listen(window, "pagehide", sendOnHide);
+  listen(window, "blur", releaseKeys); // a held Space must not stay "held" when the window loses focus
 
   // ---- navigation -------------------------------------------------------------------------
   async function go(id) {
@@ -608,7 +643,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       const box = ui.draft;
       ui.draft = null;
       const bigEnough = box && box.w * ui.view.scale >= MIN_DRAW_PX && box.h * ui.view.scale >= MIN_DRAW_PX && box.w >= minBox() && box.h >= minBox();
-      if (!cancelled && bigEnough) {
+      if (!cancelled && bigEnough && canAdd()) {
         const id = newId();
         commit(addBox(history.present, id, activeClassId(), box));
         ui.selection = new Set([id]);
@@ -624,6 +659,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   };
   listen(stage, "pointerup", (event) => finishDrag(event, false));
   listen(stage, "pointercancel", (event) => finishDrag(event, true));
+  listen(stage, "lostpointercapture", (event) => { if (ui.drag) finishDrag(event, true); });
   listen(stage, "wheel", (event) => {
     event.preventDefault();
     const { sx, sy } = stagePoint(event);
@@ -633,7 +669,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   }, { passive: false });
 
   // ---- keyboard ---------------------------------------------------------------------------
-  const DIGITS = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4, Digit5: 5, Digit6: 6, Digit7: 7, Digit8: 8, Digit9: 9 };
+  const DIGITS = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4, Digit5: 5, Digit6: 6, Digit7: 7, Digit8: 8, Digit9: 9, Numpad1: 1, Numpad2: 2, Numpad3: 3, Numpad4: 4, Numpad5: 5, Numpad6: 6, Numpad7: 7, Numpad8: 8, Numpad9: 9 };
   listen(document, "keydown", (event) => {
     if (document.querySelector("dialog[open]") || isTyping(event.target)) return;
     const key = event.key;
@@ -646,8 +682,10 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       else if (lower === "y") { event.preventDefault(); redo(); }
       else if (lower === "d") { event.preventDefault(); duplicateSelection(); }
       else if (lower === "a" && onStage) { event.preventDefault(); ui.selection = new Set(history.present.annotations.map((a) => a.id)); renderAll(); }
+      else if (lower === "s") { event.preventDefault(); void saver.flushNow(); toast("Changes are saved automatically."); } // not the browser's Save dialog
       return; // Ctrl+K and friends belong to the app shell
     }
+    if (event.altKey && !key.startsWith("Arrow")) return; // Alt+letter is the browser's, not ours
     if (event.code in DIGITS && !event.altKey) {
       const target = classes[DIGITS[event.code] - 1];
       if (!target) return;

@@ -1,7 +1,7 @@
 // Dialog to create, rename, recolour and delete a class. Shared by the annotator and the gallery.
 import { api } from "./api.js";
 import { limits } from "./limits.js";
-import { confirmDialog, el, openDialog, plural, toast } from "./ui.js";
+import { confirmDialog, el, enableRadioArrows, openDialog, plural, rovingTabindex, toast } from "./ui.js";
 
 /**
  * existing: a class object to edit, or null to create one.
@@ -16,17 +16,23 @@ export function openClassDialog({ projectId, existing = null, onChanged }) {
   let color = existing ? existing.color : null; // null: the server picks the next palette colour
   const swatches = el("div", { class: "swatches", role: "radiogroup", "aria-label": "Colour" });
   const paintSwatches = () => {
+    const hadFocus = swatches.contains(document.activeElement);
     swatches.replaceChildren(
-      ...limits.palette.map((value) =>
+      ...limits.palette.map((value, index) =>
         el("button", {
           type: "button", class: "swatch", role: "radio", style: `background:${value}`,
-          "aria-label": `Colour ${value}`, "aria-checked": String(color && color.toUpperCase() === value.toUpperCase()),
+          // a hex code means nothing to a screen reader; say which swatch this is instead
+          "aria-label": `Colour ${index + 1} of ${limits.palette.length}`,
+          "aria-checked": String(color && color.toUpperCase() === value.toUpperCase()),
           onclick: () => { color = value; paintSwatches(); },
         }),
       ),
     );
+    rovingTabindex(swatches);
+    if (hadFocus) swatches.querySelector('[aria-checked="true"]')?.focus();
   };
   paintSwatches();
+  enableRadioArrows(swatches);
   const problem = el("p", { class: "error-text", role: "alert" });
   let handle;
 
@@ -65,7 +71,7 @@ export function openClassDialog({ projectId, existing = null, onChanged }) {
       const ok = await confirmDialog({
         title: `Delete “${existing.name}” and its annotations?`,
         message: `This class is used by ${plural(use.annotations, "annotation")} in ${plural(use.images, "image")} and as the label of ${plural(use.labels, "image")}. Deleting it permanently deletes those annotations and clears those labels. This cannot be undone.`,
-        confirmLabel: `Delete class and ${plural(use.annotations, "annotation")}`,
+        confirmLabel: use.annotations ? `Delete class and ${plural(use.annotations, "annotation")}` : "Delete class",
         danger: true,
       });
       if (!ok) return;

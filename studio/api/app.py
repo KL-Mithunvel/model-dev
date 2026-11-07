@@ -12,12 +12,13 @@ import sqlite3
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import Path as PathParam
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from studio import annotations, db, importer, paths, repo
@@ -28,6 +29,8 @@ from studio.jobs import JobManager
 logger = logging.getLogger(__name__)
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 IMMUTABLE = "public, max-age=31536000, immutable"  # URLs carry the content hash (?v=)
+MAX_ID = 2**62  # SQLite integers are 64-bit; anything larger would be a server error, not a 404
+ID = Annotated[int, PathParam(ge=1, le=MAX_ID)]
 
 
 class ProjectCreate(BaseModel):
@@ -55,20 +58,20 @@ class ClassCreate(BaseModel):
 class ClassUpdate(BaseModel):
     name: str | None = None
     color: str | None = None
-    position: int | None = None
+    position: StrictInt | None = Field(default=None, ge=0, le=10**9)
 
 
 class AnnotationItem(BaseModel):
-    class_id: int
+    class_id: StrictInt = Field(ge=1, le=MAX_ID)
     kind: str
     data: dict[str, Any]
 
 
 class AnnotationsSave(BaseModel):
-    rev: int
+    rev: StrictInt = Field(ge=0, le=MAX_ID)
     annotations: list[AnnotationItem]
     marked_empty: bool = False
-    label_class_id: int | None = None
+    label_class_id: StrictInt | None = Field(default=None, ge=1, le=MAX_ID)
 
 
 class AutoSplitRequest(BaseModel):
@@ -109,7 +112,7 @@ def create_app(
 
     Conn = Depends(get_conn)
 
-    def need_project(conn: sqlite3.Connection, project_id: int) -> dict[str, Any]:
+    def need_project(conn: sqlite3.Connection, project_id: ID) -> dict[str, Any]:
         project = repo.get_project(conn, project_id)
         if project is None:
             raise HTTPException(404, f"Project {project_id} not found.")
@@ -162,11 +165,11 @@ def create_app(
         return project
 
     @app.get("/api/projects/{project_id}")
-    def get_project(project_id: int, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
+    def get_project(project_id: ID, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
         return need_project(conn, project_id)
 
     @app.delete("/api/projects/{project_id}", status_code=204)
-    def delete_project(project_id: int, conn: sqlite3.Connection = Conn) -> Response:
+    def delete_project(project_id: ID, conn: sqlite3.Connection = Conn) -> Response:
         if jobs.has_active(project_id):
             raise HTTPException(
                 409, "An import is still running for this project. Cancel it first."
@@ -184,7 +187,7 @@ def create_app(
     # ---- imports ----------------------------------------------------------------------------
     @app.post("/api/projects/{project_id}/imports", status_code=202)
     def start_import(
-        project_id: int, body: ImportRequest, conn: sqlite3.Connection = Conn
+        project_id: ID, body: ImportRequest, conn: sqlite3.Connection = Conn
     ) -> dict[str, str]:
         need_project(conn, project_id)
         source = Path(body.path).expanduser()
@@ -246,22 +249,22 @@ def create_app(
             return  # the browser went away (tab closed or hidden); nothing to clean up
 
     @app.get("/api/projects/{project_id}/batches")
-    def list_batches(project_id: int, conn: sqlite3.Connection = Conn) -> list[dict[str, Any]]:
+    def list_batches(project_id: ID, conn: sqlite3.Connection = Conn) -> list[dict[str, Any]]:
         need_project(conn, project_id)
         return repo.list_batches(conn, project_id)
 
     # ---- images -----------------------------------------------------------------------------
     @app.get("/api/projects/{project_id}/images")
     def list_images(
-        project_id: int,
+        project_id: ID,
         offset: int = Query(0, ge=0),
         limit: int | None = Query(None, ge=1),
         split: str | None = None,
         tag: str | None = None,
-        batch_id: int | None = None,
+        batch_id: int | None = Query(None, ge=1, le=MAX_ID),
         q: str | None = None,
         labelled: bool | None = None,
-        class_id: int | None = None,
+        class_id: int | None = Query(None, ge=1, le=MAX_ID),
         conn: sqlite3.Connection = Conn,
     ) -> dict[str, Any]:
         need_project(conn, project_id)
@@ -290,11 +293,11 @@ def create_app(
         }
 
     @app.get("/api/projects/{project_id}/tags")
-    def list_tags(project_id: int, conn: sqlite3.Connection = Conn) -> list[dict[str, Any]]:
+    def list_tags(project_id: ID, conn: sqlite3.Connection = Conn) -> list[dict[str, Any]]:
         need_project(conn, project_id)
         return repo.project_tags(conn, project_id)
 
-    def image_file(conn: sqlite3.Connection, image_id: int, thumb: bool) -> FileResponse:
+    def image_file(conn: sqlite3.Connection, image_id: ID, thumb: bool) -> FileResponse:
         image = repo.get_image(conn, image_id)
         if image is None:
             raise HTTPException(404, f"Image {image_id} not found.")
@@ -307,23 +310,23 @@ def create_app(
         return FileResponse(path, headers={"Cache-Control": IMMUTABLE})
 
     @app.get("/api/images/{image_id}")
-    def get_image(image_id: int, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
+    def get_image(image_id: ID, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
         image = repo.get_image(conn, image_id)
         if image is None:
             raise HTTPException(404, f"Image {image_id} not found.")
         return image_urls(image)
 
     @app.get("/api/images/{image_id}/thumb")
-    def get_thumb(image_id: int, conn: sqlite3.Connection = Conn) -> FileResponse:
+    def get_thumb(image_id: ID, conn: sqlite3.Connection = Conn) -> FileResponse:
         return image_file(conn, image_id, thumb=True)
 
     @app.get("/api/images/{image_id}/file")
-    def get_file(image_id: int, conn: sqlite3.Connection = Conn) -> FileResponse:
+    def get_file(image_id: ID, conn: sqlite3.Connection = Conn) -> FileResponse:
         return image_file(conn, image_id, thumb=False)
 
     @app.put("/api/images/{image_id}/tags")
     def put_tags(
-        image_id: int, body: TagsRequest, conn: sqlite3.Connection = Conn
+        image_id: ID, body: TagsRequest, conn: sqlite3.Connection = Conn
     ) -> dict[str, Any]:
         if repo.get_image(conn, image_id) is None:
             raise HTTPException(404, f"Image {image_id} not found.")
@@ -338,13 +341,13 @@ def create_app(
 
     # ---- classes ----------------------------------------------------------------------------
     @app.get("/api/projects/{project_id}/classes")
-    def get_classes(project_id: int, conn: sqlite3.Connection = Conn) -> list[dict[str, Any]]:
+    def get_classes(project_id: ID, conn: sqlite3.Connection = Conn) -> list[dict[str, Any]]:
         need_project(conn, project_id)
         return annotations_repo.list_classes(conn, project_id)
 
     @app.post("/api/projects/{project_id}/classes", status_code=201)
     def add_class(
-        project_id: int, body: ClassCreate, conn: sqlite3.Connection = Conn
+        project_id: ID, body: ClassCreate, conn: sqlite3.Connection = Conn
     ) -> dict[str, Any]:
         need_project(conn, project_id)
         try:
@@ -361,7 +364,7 @@ def create_app(
 
     @app.patch("/api/classes/{class_id}")
     def change_class(
-        class_id: int, body: ClassUpdate, conn: sqlite3.Connection = Conn
+        class_id: ID, body: ClassUpdate, conn: sqlite3.Connection = Conn
     ) -> dict[str, Any]:
         try:
             name = (
@@ -380,7 +383,7 @@ def create_app(
 
     @app.delete("/api/classes/{class_id}", status_code=204)
     def remove_class(
-        class_id: int, force: bool = False, conn: sqlite3.Connection = Conn
+        class_id: ID, force: bool = False, conn: sqlite3.Connection = Conn
     ) -> Response:
         try:
             found = annotations_repo.delete_class(conn, class_id, force)
@@ -394,7 +397,7 @@ def create_app(
 
     # ---- annotations ------------------------------------------------------------------------
     @app.get("/api/images/{image_id}/annotations")
-    def get_image_annotations(image_id: int, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
+    def get_image_annotations(image_id: ID, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
         result = annotations_repo.get_annotations(conn, image_id)
         if result is None:
             raise HTTPException(404, f"Image {image_id} not found.")
@@ -402,7 +405,7 @@ def create_app(
 
     @app.put("/api/images/{image_id}/annotations")
     def put_image_annotations(
-        image_id: int, body: AnnotationsSave, conn: sqlite3.Connection = Conn
+        image_id: ID, body: AnnotationsSave, conn: sqlite3.Connection = Conn
     ) -> Any:
         try:
             new_rev = annotations_repo.save_annotations(
@@ -420,12 +423,12 @@ def create_app(
         return {"rev": new_rev}
 
     @app.get("/api/projects/{project_id}/annotation-stats")
-    def get_annotation_stats(project_id: int, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
+    def get_annotation_stats(project_id: ID, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
         need_project(conn, project_id)
         return annotations_repo.annotation_stats(conn, project_id)
 
     @app.get("/api/images/{image_id}/neighbours")
-    def get_neighbours(image_id: int, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
+    def get_neighbours(image_id: ID, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
         result = annotations_repo.neighbours(conn, image_id)
         if result is None:
             raise HTTPException(404, f"Image {image_id} not found.")
@@ -434,7 +437,7 @@ def create_app(
     # ---- splits -----------------------------------------------------------------------------
     @app.put("/api/projects/{project_id}/split")
     def put_split(
-        project_id: int, body: SetSplitRequest, conn: sqlite3.Connection = Conn
+        project_id: ID, body: SetSplitRequest, conn: sqlite3.Connection = Conn
     ) -> dict[str, Any]:
         need_project(conn, project_id)
         try:
@@ -445,7 +448,7 @@ def create_app(
 
     @app.post("/api/projects/{project_id}/split/auto")
     def auto_split(
-        project_id: int, body: AutoSplitRequest, conn: sqlite3.Connection = Conn
+        project_id: ID, body: AutoSplitRequest, conn: sqlite3.Connection = Conn
     ) -> dict[str, Any]:
         need_project(conn, project_id)
         defaults = config["splits"]

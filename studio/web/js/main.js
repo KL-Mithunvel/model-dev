@@ -1,6 +1,6 @@
 // App shell: sidebar, toolbar, hash router, theme, global shortcuts, command palette.
 import { openPalette, showShortcuts } from "./palette.js";
-import { el, getTheme, icon, isTyping, openDialog, setTheme } from "./ui.js";
+import { dismissNewestToast, el, getTheme, icon, isTyping, openDialog, setTheme } from "./ui.js";
 
 const main = document.getElementById("main");
 const titleNode = document.getElementById("title");
@@ -137,6 +137,12 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     showShortcuts();
   }
+});
+
+// Escape dismisses the newest toast, unless a view already used the key (it calls preventDefault) or a
+// dialog is open. Registered on window so it runs AFTER the views' document-level handlers.
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !event.defaultPrevented && !document.querySelector("dialog[open]")) dismissNewestToast();
 });
 
 menuToggle.addEventListener("click", () => {

@@ -132,8 +132,10 @@ test("defaultPolygon has the requested corners, inside the image, around the cen
   assert.ok(hex.every(([x, y]) => x >= 0 && x <= W && y >= 0 && y <= H));
   const bounds = polygonBounds(hex);
   assert.ok(Math.abs((bounds.minX + bounds.maxX) / 2 - 100) < 1);
-  assert.ok(hex.length === defaultPolygon(5, 5, 200, 100, W, H, 6).length); // near the corner still valid
-  assert.ok(defaultPolygon(0, 0, 200, 100, W, H).every(([x, y]) => x >= 0 && y >= 0));
+  const nearCorner = defaultPolygon(0, 0, 200, 100, W, H); // a view centred ON the corner: pushed inside
+  assert.ok(nearCorner.every(([x, y]) => x >= 0 && x <= W && y >= 0 && y <= H));
+  assert.ok(polygonArea(nearCorner) > 0 && polygonArea(nearCorner) > 0.5 * polygonArea(hex)); // not squashed
+  assert.equal(defaultPolygon(100, 50, 200, 100, W, H, 3).length, 3);
 });
 
 // ---- editor -----------------------------------------------------------------------------------
@@ -229,6 +231,15 @@ test("undo/redo through 100 random steps with polygons restores the exact states
       next = duplicateAnnotations(state, [pick.id], newId, 6, W, H).state;
     } else {
       next = deleteAnnotations(state, [pick.id]);
+    }
+    // Invariants that must hold after EVERY operation, independent of undo/redo:
+    for (const a of next.annotations.filter((x) => x.kind === "polygon")) {
+      assert.ok(a.data.points.length >= 3, `step ${step}: a polygon fell below 3 points`);
+      for (const [x, y] of a.data.points) {
+        assert.ok(x >= 0 && x <= W && y >= 0 && y <= H, `step ${step}: a point left the image`);
+        assert.equal(x, Math.round(x * 100) / 100, `step ${step}: x not rounded to 2 decimals`);
+        assert.equal(y, Math.round(y * 100) / 100, `step ${step}: y not rounded to 2 decimals`);
+      }
     }
     if (history.push(next)) snapshots.push(JSON.stringify(history.present));
   }

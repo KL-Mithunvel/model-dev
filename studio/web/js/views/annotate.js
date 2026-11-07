@@ -24,6 +24,7 @@ const MIN_DRAW_PX = 4; // a drag shorter than this on screen is a click, not a b
 const DRAG_START_PX = 3; // a press must move this far before it moves a shape
 const CLOSE_RADIUS_PX = 10; // clicking this close to the first point closes a polygon
 const MIN_POINT_GAP_PX = 3; // a second click this close to the last point is a double-click, not a new point
+const DOUBLE_CLICK_GUARD_MS = 450; // presses this soon after a polygon was closed are the 2nd half of a double-click
 const NUDGE = 1;
 const NUDGE_BIG = 10;
 const CURSORS = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize" };
@@ -70,7 +71,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   // ---- skeleton ---------------------------------------------------------------------------
   const toolstrip = el("div", { class: "toolstrip", role: "toolbar", "aria-label": "Tools", "aria-orientation": "vertical" });
   const viewport = el("div", { class: "viewport" });
-  const stage = el("div", { class: "stage", tabindex: "0", role: "application", "aria-label": "Image canvas. B draws boxes, V selects, H or Space pans, A and D change image. Press ? for all shortcuts." }, viewport);
+  const stage = el("div", { class: "stage", tabindex: "0", role: "application", "aria-label": "Image canvas. B draws boxes, P draws polygons, Enter drops a default shape in the middle, V selects, H or Space pans, A and D change image. Press ? for all shortcuts." }, viewport);
   const hud = el("div", { class: "hud", "aria-hidden": "true" });
   const banner = el("div", { class: "a-banner", role: "status", hidden: true });
   const live = el("div", { class: "sr-only", role: "status", "aria-live": "polite" });
@@ -205,6 +206,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   // ---- rendering --------------------------------------------------------------------------
   let shapeNodes = new Map(); // annotation id -> { rect, label }
   let handleNodes = new Map(); // handle name -> rect
+  let draftLayer = null; // <g> holding the polygon being drawn
 
   const pointsAttr = (points) => points.map(([x, y]) => `${x},${y}`).join(" ");
   const MAX_MID_HANDLES = 150; // beyond this many points the edge-midpoint handles only add clutter and cost
@@ -263,6 +265,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   }
 
   function renderShapes() {
+    pruneVertex(); // a cancelled drag can leave a selected point that no longer exists
     const state = current();
     const scale = ui.view.scale;
     shapeNodes = new Map();
@@ -316,21 +319,27 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       const color = classById(activeClassId())?.color ?? "#999999";
       svg.append(svgEl("rect", { x: ui.draft.x, y: ui.draft.y, width: ui.draft.w, height: ui.draft.h, fill: color, "fill-opacity": 0.2, stroke: color, "stroke-width": 2, "stroke-dasharray": "6 4", "vector-effect": "non-scaling-stroke", "pointer-events": "none" }));
     }
-    if (ui.poly && ui.poly.points.length) renderPolygonDraft(scale);
+    draftLayer = svgEl("g", { "pointer-events": "none" });
+    svg.append(draftLayer);
+    renderPolygonDraft();
   }
 
-  /** The polygon being drawn: outline so far, a rubber band to the pointer, and the closing target. */
-  function renderPolygonDraft(scale) {
+  /** The polygon being drawn, in its own layer so moving the pointer never rebuilds the real shapes. */
+  function renderPolygonDraft() {
+    if (!draftLayer) return;
+    draftLayer.replaceChildren();
+    if (!ui.poly || !ui.poly.points.length) return;
+    const scale = ui.view.scale;
     const color = classById(activeClassId())?.color ?? "#999999";
     const points = ui.poly.points;
     const all = ui.poly.cursor ? [...points, ui.poly.cursor] : points;
-    if (all.length >= 3) svg.append(svgEl("polygon", { points: pointsAttr(all), fill: color, "fill-opacity": 0.12, "pointer-events": "none" }));
-    svg.append(svgEl("polyline", { points: pointsAttr(all), fill: "none", stroke: color, "stroke-width": 2, "stroke-dasharray": "6 4", "vector-effect": "non-scaling-stroke", "pointer-events": "none" }));
+    if (all.length >= 3) draftLayer.append(svgEl("polygon", { points: pointsAttr(all), fill: color, "fill-opacity": 0.12 }));
+    draftLayer.append(svgEl("polyline", { points: pointsAttr(all), fill: "none", stroke: color, "stroke-width": 2, "stroke-dasharray": "6 4", "vector-effect": "non-scaling-stroke" }));
     const closable = points.length >= 3;
     const near = closable && ui.poly.cursor && Math.hypot(ui.poly.cursor[0] - points[0][0], ui.poly.cursor[1] - points[0][1]) * scale <= CLOSE_RADIUS_PX;
     points.forEach(([x, y], i) => {
       const first = i === 0 && closable;
-      svg.append(svgEl("circle", { cx: x, cy: y, r: (first ? 7 : 4) / scale, fill: color, class: `poly-dot${first ? " close-target" : ""}${first && near ? " hot" : ""}`, "pointer-events": "none" }));
+      draftLayer.append(svgEl("circle", { cx: x, cy: y, r: (first ? 7 : 4) / scale, fill: color, class: `poly-dot${first ? " close-target" : ""}${first && near ? " hot" : ""}` }));
     });
   }
 
@@ -483,11 +492,18 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     renderAll();
     announce(message);
   }
+  /** True (with a message) while a polygon is half drawn: leaving would silently throw it away. */
+  function blockWhileDrawing() {
+    if (!ui.poly || !ui.poly.points.length) return false;
+    toast("Finish the polygon (Enter) or cancel it (Esc) first.", { error: true });
+    return true;
+  }
   function setTool(name) {
+    if (name !== "polygon" && blockWhileDrawing()) return;
     ui.tool = name;
-    if (name !== "polygon" && ui.poly) { ui.poly = null; renderShapes(); }
     renderToolstrip();
     announce(`${{ box: "Box", polygon: "Polygon", pan: "Pan" }[name] ?? "Select"} tool`);
+    stage.focus({ preventScroll: true }); // so Enter / arrows / [ ] go to the canvas, not to the tool button
   }
   function needClass() {
     toast("Add a class first, then draw.", { error: true });
@@ -522,6 +538,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     commit(setLabel(history.present, history.present.label_class_id === classId ? null : classId));
   }
   function toggleEmpty() {
+    if (blockWhileDrawing()) return;
     const state = history.present;
     if (!state.marked_empty && !canMarkEmpty(state)) {
       toast("This image has annotations. Delete them first to mark it as having no objects.", { error: true });
@@ -558,10 +575,14 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     announce("Box added. Use the arrow keys to move it and Alt with the arrows to resize.");
   }
   // ---- polygons ---------------------------------------------------------------------------
+  let lastClosedAt = -1e9;
+  let lastClosedPoint = [0, 0];
   const screenGap = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) * ui.view.scale;
 
   function addPolygonPoint(p) {
     const point = [Math.min(Math.max(p.x, 0), width), Math.min(Math.max(p.y, 0), height)];
+    // 2nd half of a double-click that just closed a polygon: same spot, moments later
+    if (!ui.poly && performance.now() - lastClosedAt < DOUBLE_CLICK_GUARD_MS && screenGap(point, lastClosedPoint) <= CLOSE_RADIUS_PX) return;
     if (!ui.poly) ui.poly = { points: [], cursor: null };
     const points = ui.poly.points;
     if (points.length >= 3 && screenGap(point, points[0]) <= CLOSE_RADIUS_PX) { finishPolygon(); return; }
@@ -588,6 +609,8 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     const id = newId();
     const points = poly.points;
     ui.poly = null;
+    lastClosedAt = performance.now();
+    lastClosedPoint = points[0];
     commit(addPolygon(history.present, id, activeClassId(), points));
     ui.selection = new Set([id]);
     renderAll();
@@ -630,7 +653,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   function deleteVertex(id, index) {
     const next = removeVertex(history.present, id, index);
     if (next === history.present) { toast("A polygon needs at least 3 points. Delete the whole polygon instead.", { error: true }); return; }
-    commit(next);
+    if (!commitPolygonEdit(next, id)) return;
     const left = next.annotations.find((a) => a.id === id).data.points.length;
     ui.vertex = { id, index: Math.min(index, left - 1) };
     renderAll();
@@ -642,6 +665,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     if (!polygon || !ui.vertex || ui.vertex.id !== polygon.id) return false;
     const points = polygon.data.points;
     const index = ui.vertex.index;
+    if (index >= points.length) { ui.vertex = null; return false; }
     const [x, y] = midpoint(points[index], points[(index + 1) % points.length]);
     commit(insertVertex(history.present, polygon.id, index, x, y, width, height));
     ui.vertex = { id: polygon.id, index: index + 1 };
@@ -653,8 +677,9 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   function nudgeVertex(dx, dy) {
     const polygon = selectedPolygon();
     if (!polygon || !ui.vertex) return;
-    const [x, y] = polygon.data.points[ui.vertex.index];
-    commit(moveVertex(history.present, polygon.id, ui.vertex.index, x + dx, y + dy, width, height), { key: "vertexnudge" });
+    const point = polygon.data.points[ui.vertex.index];
+    if (!point) { ui.vertex = null; return; }
+    commitPolygonEdit(moveVertex(history.present, polygon.id, ui.vertex.index, point[0] + dx, point[1] + dy, width, height), polygon.id, { key: `vertexnudge:${ui.vertex.index}` });
   }
 
   function simplifySelected() {
@@ -662,17 +687,36 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     if (!polygon) { toast("Select a polygon first."); return; }
     const { state, before, after } = simplifyAnnotation(history.present, polygon.id, limits.simplify_epsilon_px);
     if (after >= before) { toast("Nothing to simplify: every point matters at this tolerance."); return; }
-    commit(state);
+    if (!commitPolygonEdit(state, polygon.id)) return;
     ui.vertex = null;
     renderAll();
     toast(`Reduced the polygon from ${before} to ${after} points`, { actionLabel: "Undo", onAction: undo });
   }
 
+  /** A polygon with (almost) no area is refused by the server, so do not apply an edit that makes one. */
+  function commitPolygonEdit(next, id, options = {}) {
+    const polygon = next.annotations.find((a) => a.id === id && a.kind === "polygon");
+    if (polygon && polygonArea(polygon.data.points) < limits.min_polygon_area_px) {
+      ui.preview = null;
+      toast("That would flatten the polygon, so the change was not applied.", { error: true });
+      renderAll();
+      return false;
+    }
+    return commit(next, options);
+  }
+
+  // The crossing test is O(n^2): remember the answer per points array (unchanged polygons keep their array).
+  const crossingCache = new WeakMap();
+  const crossingOf = (points) => {
+    if (!crossingCache.has(points)) crossingCache.set(points, polygonSelfIntersects(points));
+    return crossingCache.get(points);
+  };
+
   function annotationLabel(a, i) {
     const kind = a.kind === "box" ? "Box" : a.kind === "polygon" ? "Polygon" : a.kind;
     let detail = "";
     if (a.kind === "polygon") {
-      const crossing = a.data.points.length <= 300 && polygonSelfIntersects(a.data.points);
+      const crossing = a.data.points.length <= 300 && crossingOf(a.data.points);
       detail = ` · ${a.data.points.length} points${crossing ? " · crosses itself" : ""}`;
     }
     return `${kind} ${i + 1} · ${classById(a.class_id)?.name ?? "?"}${detail}`;
@@ -682,13 +726,17 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     if (neighbours.previous === null) return;
     try {
       const previous = await api(`/api/images/${neighbours.previous}/annotations`);
-      const { state, ids } = appendFromServer(history.present, previous, newId, new Set(classes.map((c) => c.id)));
-      if (!ids.length) { toast("The previous image has no annotations to copy."); return; }
+      const { state, ids, skipped } = appendFromServer(history.present, previous, newId, new Set(classes.map((c) => c.id)), width, height);
+      if (!ids.length) {
+        toast(skipped ? `None of the previous image's ${plural(skipped, "annotation")} fit this image's size.` : "The previous image has no annotations to copy.", { error: Boolean(skipped) });
+        return;
+      }
       if (!canAdd(ids.length)) return;
       commit(state);
       ui.selection = new Set(ids);
       renderAll();
-      toast(`Copied ${plural(ids.length, "annotation")} from the previous image`, { actionLabel: "Undo", onAction: undo });
+      const note = skipped ? `, skipped ${skipped} that do not fit this image's size` : "";
+      toast(`Copied ${plural(ids.length, "annotation")} from the previous image${note}`, { actionLabel: "Undo", onAction: undo });
     } catch (error) {
       toast(error.message, { error: true });
     }
@@ -732,6 +780,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
         classes = await api(`/api/projects/${projectId}/classes`);
         commit(dropUnknownClasses(history.present, new Set(classes.map((c) => c.id))));
       } },
+      { label: "Undo my last change", onClick: () => undo() },
       { label: "Load the latest version", onClick: async () => { clearDraft(storage, imageId); await loadServerState(); hideBanner(); statusBanner = false; renderAll(); } },
     ]);
   }
@@ -759,6 +808,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
 
   // ---- navigation -------------------------------------------------------------------------
   async function go(id) {
+    if (blockWhileDrawing()) return;
     if (id === null || id === undefined) { toast("There is no image in that direction."); return; }
     await saver.flush();
     if (saver.status === "error" || saver.status === "conflict") {
@@ -849,7 +899,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     updateHud(p);
     if (ui.tool === "polygon" && ui.poly && !ui.drag) { // the rubber band follows the pointer
       ui.poly.cursor = [Math.min(Math.max(p.x, 0), width), Math.min(Math.max(p.y, 0), height)];
-      renderShapes();
+      renderPolygonDraft();
       return;
     }
     const drag = ui.drag;
@@ -900,8 +950,13 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       }
       return;
     }
-    if (!cancelled && drag.moved && ui.preview) commit(ui.preview);
-    else { ui.preview = null; renderShapes(); }
+    if (!cancelled && drag.moved && ui.preview) {
+      if (drag.type === "vertex") commitPolygonEdit(ui.preview, drag.id);
+      else commit(ui.preview);
+    } else {
+      ui.preview = null;
+      renderShapes();
+    }
   };
   listen(stage, "pointerup", (event) => finishDrag(event, false));
   listen(stage, "dblclick", () => { if (ui.tool === "polygon" && ui.poly && ui.poly.points.length >= 3) finishPolygon(); });
@@ -912,6 +967,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     const { sx, sy } = stagePoint(event);
     ui.view = zoomAt(ui.view, Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 0.0015)), sx, sy);
     ui.fitted = false;
+    if (ui.poly) { const under = screenToImage(ui.view, sx, sy); ui.poly.cursor = [under.x, under.y]; } // no stale rubber band
     applyView();
   }, { passive: false });
 
@@ -958,10 +1014,10 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       else if (ui.vertex) deleteVertex(ui.vertex.id, ui.vertex.index);
       else deleteSelection();
     } else if (key === "Escape") {
-      if (ui.drag) finishDrag({ pointerId: -1 }, true);
-      else if (ui.poly) { ui.poly = null; renderShapes(); announce("Polygon cancelled"); }
-      else if (ui.vertex) { ui.vertex = null; renderShapes(); }
-      else if (ui.selection.size) { ui.selection.clear(); renderAll(); }
+      if (ui.drag) { event.preventDefault(); finishDrag({ pointerId: -1 }, true); }
+      else if (ui.poly) { event.preventDefault(); ui.poly = null; renderShapes(); announce("Polygon cancelled"); }
+      else if (ui.vertex) { event.preventDefault(); ui.vertex = null; renderShapes(); }
+      else if (ui.selection.size) { event.preventDefault(); ui.selection.clear(); renderAll(); }
     } else if (key === "Enter" && onStage && ui.tool === "polygon") { event.preventDefault(); if (ui.poly) finishPolygon(); else polygonAtCentre(); }
     else if (key === "Enter" && onStage && ui.tool === "box") { event.preventDefault(); boxAtCentre(); }
     else if ((key === "[" || key === "]") && onStage) { if (stepVertex(key === "]" ? 1 : -1)) event.preventDefault(); }
@@ -969,7 +1025,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     else if (key === "Tab" && event.target === stage) {
       const only = ui.selection.size === 1 ? [...ui.selection][0] : null;
       const next = cycle(history.present, only, event.shiftKey ? -1 : 1);
-      if (next !== null) { event.preventDefault(); ui.selection = new Set([next]); renderAll(); announce(`Annotation ${history.present.annotations.findIndex((a) => a.id === next) + 1} selected`); }
+      if (next !== null) { event.preventDefault(); ui.selection = new Set([next]); renderAll(); announce(`${annotationLabel(history.present.annotations.find((a) => a.id === next), history.present.annotations.findIndex((a) => a.id === next))} selected`); }
     } else if (onStage && key.startsWith("Arrow") && ui.selection.size) {
       event.preventDefault();
       const step = event.shiftKey ? NUDGE_BIG : NUDGE;

@@ -91,7 +91,8 @@ export function toast(message, { error = false, actionLabel = null, onAction = n
   }
   // The toast body lets clicks through to the page underneath (it can cover the bottom of the
   // canvas); only its buttons take clicks. Every toast can be dismissed with the x button.
-  node.append(el("button", { type: "button", class: "toast-close", "aria-label": "Dismiss", text: "×", onclick: () => node.remove() }));
+  // aria-hidden + tabindex -1: a screen-reader or keyboard user dismisses with Esc instead (see dismissNewestToast)
+  node.append(el("button", { type: "button", class: "toast-close", "aria-hidden": "true", tabindex: "-1", text: "×", onclick: () => node.remove() }));
   host.append(node);
   while (host.children.length > 3) host.firstElementChild.remove(); // never let toasts pile up over the page
   if (!error) setTimeout(() => node.remove(), 5000); // errors stay until dismissed or pushed out
@@ -198,4 +199,12 @@ export function enableRadioArrows(group) {
     next.focus();
     next.click();
   });
+}
+
+/** Remove the newest toast (the Escape key does this). Returns true if there was one. */
+export function dismissNewestToast() {
+  const newest = document.getElementById("toasts")?.lastElementChild;
+  if (!newest) return false;
+  newest.remove();
+  return true;
 }

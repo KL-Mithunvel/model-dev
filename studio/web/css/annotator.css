@@ -19,7 +19,7 @@
 .viewport { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 .viewport .photo { position: absolute; inset: 0; width: 100%; height: 100%; display: block; user-select: none; pointer-events: none; }
 .viewport .overlay { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.overlay .shape rect { cursor: move; }
+.overlay .shape rect, .overlay .shape polygon { cursor: move; }
 .overlay text { fill: var(--on-image); stroke: #000; stroke-width: 3px; paint-order: stroke; pointer-events: none; font-family: var(--font); font-weight: 600; }
 .overlay .handle { fill: var(--surface); stroke: var(--accent); }
 .hud {

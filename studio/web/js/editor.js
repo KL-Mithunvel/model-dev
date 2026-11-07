@@ -136,10 +136,23 @@ export function duplicateAnnotations(state, ids, newId, offset, width, height) {
   };
 }
 
-/** Copy another image's annotations onto this one ("repeat previous image"). */
-export function appendFromServer(state, response, newId, validClassIds) {
-  const incoming = response.annotations
-    .filter((item) => validClassIds.has(item.class_id))
+/** Does this annotation lie entirely inside a width x height image? */
+export function fitsImage(item, width, height) {
+  const inside = (x, y) => x >= 0 && y >= 0 && x <= width && y <= height;
+  if (item.kind === "box") return inside(item.data.x, item.data.y) && inside(item.data.x + item.data.w, item.data.y + item.data.h);
+  return item.data.points.every(([x, y]) => inside(x, y));
+}
+
+/**
+ * Copy another image's annotations onto this one ("repeat previous image").
+ * Only annotations of known classes that FIT this image are copied (the other image may have a
+ * different size, and scaling would be a guess). Returns { state, ids, skipped }.
+ */
+export function appendFromServer(state, response, newId, validClassIds, width, height) {
+  const usable = response.annotations.filter((item) => validClassIds.has(item.class_id));
+  const fitting = usable.filter((item) => fitsImage(item, width, height));
+  const skipped = usable.length - fitting.length;
+  const incoming = fitting
     .map((item) => ({
       id: newId(),
       class_id: item.class_id,
@@ -151,6 +164,7 @@ export function appendFromServer(state, response, newId, validClassIds) {
       marked_empty: incoming.length ? false : state.marked_empty,
     }),
     ids: incoming.map((a) => a.id),
+    skipped,
   };
 }
 

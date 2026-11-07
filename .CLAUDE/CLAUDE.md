@@ -98,7 +98,7 @@ python tools\compute_survey.py      # CPU / RAM / disk / GPU survey
 ```powershell
 python tools\dev_run.py list                       # scenarios in tools\scenarios\
 python tools\dev_run.py run smoke                  # VISIBLE Edge window, watchable pace (default)
-python tools\dev_run.py run annotate_flow --headless   # also: annotate, annotate_gallery, annotate_robust, annotate_polygon, annotate_perf
+python tools\dev_run.py run annotate_flow --headless   # also: annotate, annotate_gallery, annotate_robust, annotate_polygon, annotate_polygon_review, annotate_perf
 python tools\dev_run.py run smoke --headless       # no window, full speed (quick checks / CI-style)
 python tools\dev_run.py run tour --pace 1.5        # narrated demo, slower
 python tools\dev_run.py open                       # app + demo data + browser for YOU; Ctrl+C stops all
@@ -224,6 +224,9 @@ _Not yet filled — update before the first session._
 ---
 
 ## Known Technical Debt
+
+- **Polygon perf at extremes**: a full inspector render with 50 polygons of 300 points was ~207 ms before the crossing-test cache (`crossingOf`, per points array); now only changed polygons are re-tested. The rubber band redraws only the draft layer. Not re-measured at that extreme.
+- **v0.3 review NITs left as debt**: polygon labels can overlap; UI constants (`CLOSE_RADIUS_PX`, `MIN_POINT_GAP_PX`, `DOUBLE_CLICK_GUARD_MS`) live in code.
 
 - **Polygons are hole-free and may cross themselves.** Self-crossing shapes are flagged but accepted (the server only rejects near-zero area). Exporters in Stage 3 must decide how to rasterise or reject them.
 - **Midpoint handles are hidden above 150 points** per polygon (too many to be useful); use Simplify or the keyboard (`I`) there. Polygon labels sit at the bounding box's top-left corner and can overlap neighbours.

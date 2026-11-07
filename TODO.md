@@ -34,7 +34,8 @@
 - [ ] v0.2: owner approval of the `v0.2` tag.
 - [x] Tagged `v0.2` on 96e93e9 (2026-11-07), approved by the owner.
 - [x] Stage 2 v0.3 (polygons) built; 18 polygon unit tests, `annotate_polygon` scenario (34 checks), perf with 200 polygons.
-- [ ] v0.3: independent review, fix findings, then ask the owner to approve the `v0.3` tag.
+- [x] v0.3 independent review: PASS with 9 SHOULD findings, all fixed (scenario `annotate_polygon_review`, 16 checks).
+- [ ] Owner to approve the `v0.3` tag.
 - [ ] Stage 2 v0.4 (keypoints): after v0.3 is tagged.
 - [ ] dev_run: pace default for visible runs was chosen by me (1.0, `--pace 0` for instant) because the owner did not answer; confirm or change.
 - [ ] v0.1 follow-ups (technical debt in CLAUDE.md): parallel import, move browser checks into a real test runner, `httpx2` for the test client (install was blocked), orphan-file sweeper.

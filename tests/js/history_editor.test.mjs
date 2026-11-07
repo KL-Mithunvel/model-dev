@@ -163,10 +163,26 @@ test("appendFromServer copies only annotations of known classes", () => {
       { class_id: 99, kind: "box", data: box(9, 9, 5, 5) },
     ],
   };
-  const { state, ids } = appendFromServer(setMarkedEmpty(emptyState(), true), response, makeIdFactory(), new Set([1]));
+  const { state, ids, skipped } = appendFromServer(setMarkedEmpty(emptyState(), true), response, makeIdFactory(), new Set([1]), W, H);
   assert.equal(state.annotations.length, 1);
   assert.equal(ids.length, 1);
+  assert.equal(skipped, 0); // the unknown-class one is not "skipped for size"
   assert.equal(state.marked_empty, false);
+});
+
+test("appendFromServer skips shapes that do not fit a smaller image (and says how many)", () => {
+  const response = {
+    annotations: [
+      { class_id: 1, kind: "box", data: box(10, 10, 50, 30) }, // fits 200 x 100
+      { class_id: 1, kind: "box", data: box(150, 60, 100, 80) }, // sticks out of 200 x 100
+      { class_id: 1, kind: "polygon", data: { points: [[10, 10], [60, 10], [60, 60]] } }, // fits
+      { class_id: 1, kind: "polygon", data: { points: [[10, 10], [600, 10], [60, 60]] } }, // does not
+    ],
+  };
+  const { state, skipped } = appendFromServer(emptyState(), response, makeIdFactory(), new Set([1]), W, H);
+  assert.equal(skipped, 2);
+  assert.deepEqual(state.annotations.map((a) => a.kind), ["box", "polygon"]);
+  assert.equal(appendFromServer(emptyState(), response, makeIdFactory(), new Set([1]), 5000, 5000).skipped, 0);
 });
 
 test("dropUnknownClasses removes orphans and a dangling label", () => {

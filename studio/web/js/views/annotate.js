@@ -8,9 +8,11 @@ import {
   duplicateAnnotations, fromServer, makeIdFactory, moveAnnotations, resizeAnnotationsBy,
   resizeAnnotationTo, setClass, setLabel, setMarkedEmpty, toPayload,
   addPolygon, insertVertex, moveVertex, removeVertex, simplifyAnnotation,
+  addKeypoints, placeKeypoint, setKeypointVisibility,
 } from "../editor.js";
 import {
-  HANDLES, boxFromPoints, defaultBox, defaultPolygon, fitView, handlePoint, midpoint, panBy,
+  HANDLES, HIDDEN, NOT_LABELLED, VISIBLE, boxFromPoints, clamp, defaultBox, defaultKeypoints,
+  defaultPolygon, fitView, handlePoint, keypointsBounds, midpoint, nextVisibility, panBy,
   polygonArea, polygonBounds, polygonSelfIntersects, screenToImage, visibleRect, zoomAt,
 } from "../geometry.js";
 import { createHistory } from "../history.js";
@@ -25,6 +27,9 @@ const DRAG_START_PX = 3; // a press must move this far before it moves a shape
 const CLOSE_RADIUS_PX = 10; // clicking this close to the first point closes a polygon
 const MIN_POINT_GAP_PX = 3; // a second click this close to the last point is a double-click, not a new point
 const DOUBLE_CLICK_GUARD_MS = 450; // presses this soon after a polygon was closed are the 2nd half of a double-click
+const POSE_PAD_PX = 8; // padding of the clickable box around a set of keypoints
+const KEYPOINT_RADIUS_PX = 4.5;
+const VISIBILITY_NAMES = ["not labelled", "hidden", "visible"];
 const NUDGE = 1;
 const NUDGE_BIG = 10;
 const CURSORS = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize" };
@@ -52,7 +57,7 @@ const isLabelled = (state) => state.annotations.length > 0 || state.marked_empty
 export async function mount(container, { setToolbar, navigate, projectId, imageId }) {
   const storage = safeStorage();
   const newId = makeIdFactory();
-  const ui = { tool: "select", activeClass: null, selection: new Set(), view: { scale: 1, tx: 0, ty: 0 }, fitted: true, preview: null, draft: null, poly: null, vertex: null, drag: null, space: false };
+  const ui = { tool: "select", activeClass: null, selection: new Set(), view: { scale: 1, tx: 0, ty: 0 }, fitted: true, preview: null, draft: null, poly: null, kp: null, vertex: null, drag: null, space: false };
   let image = null;
   let classes = [];
   let neighbours = null;
@@ -71,14 +76,15 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   // ---- skeleton ---------------------------------------------------------------------------
   const toolstrip = el("div", { class: "toolstrip", role: "toolbar", "aria-label": "Tools", "aria-orientation": "vertical" });
   const viewport = el("div", { class: "viewport" });
-  const stage = el("div", { class: "stage", tabindex: "0", role: "application", "aria-label": "Image canvas. B draws boxes, P draws polygons, Enter drops a default shape in the middle, V selects, H or Space pans, A and D change image. Press ? for all shortcuts." }, viewport);
+  const stage = el("div", { class: "stage", tabindex: "0", role: "application", "aria-label": "Image canvas. B draws boxes, P draws polygons, K places keypoints, Enter drops a default shape in the middle, V selects, H or Space pans, A and D change image. Press ? for all shortcuts." }, viewport);
   const hud = el("div", { class: "hud", "aria-hidden": "true" });
+  const kpHint = el("div", { class: "kp-hint", hidden: true });
   const banner = el("div", { class: "a-banner", role: "status", hidden: true });
   const live = el("div", { class: "sr-only", role: "status", "aria-live": "polite" });
   const inspector = el("aside", { class: "a-inspector", "aria-label": "Annotations" });
   const filmstrip = el("div", { class: "filmstrip", role: "list", "aria-label": "Images" });
   container.replaceChildren(
-    el("div", { class: "annotator" }, toolstrip, el("div", { class: "stage-wrap" }, banner, stage, hud), inspector, filmstrip, live),
+    el("div", { class: "annotator" }, toolstrip, el("div", { class: "stage-wrap" }, banner, stage, hud, kpHint), inspector, filmstrip, live),
   );
   // not a live region: it changes on every edit, which would be chatty. Problems are announced instead.
   const statusChip = el("span", { class: "chip save-chip", "data-status": "saved", text: STATUS_TEXT.saved });
@@ -220,12 +226,43 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       nodes.rect.setAttribute("height", a.data.h);
       nodes.label.setAttribute("x", a.data.x + 3 / scale);
       nodes.label.setAttribute("y", a.data.y + 14 / scale);
+    } else if (a.kind === "keypoints") {
+      const bounds = keypointsBounds(a.data.points);
+      if (nodes.shown !== a.data || nodes.scale !== scale || nodes.selected !== ui.selection.has(a.id)) {
+        nodes.shown = a.data; nodes.scale = scale; nodes.selected = ui.selection.has(a.id);
+        drawPose(nodes.rect, a, bounds, scale);
+      }
+      nodes.label.setAttribute("x", (bounds ? bounds.minX - POSE_PAD_PX / scale : 0) + 3 / scale);
+      nodes.label.setAttribute("y", (bounds ? bounds.minY - POSE_PAD_PX / scale : 0) + 14 / scale);
     } else {
       nodes.rect.setAttribute("points", pointsAttr(a.data.points));
       const bounds = polygonBounds(a.data.points);
       nodes.label.setAttribute("x", bounds.minX + 3 / scale);
       nodes.label.setAttribute("y", bounds.minY + 14 / scale);
     }
+  }
+
+  /** The skeleton of a set of keypoints: a clickable box, the edges, then the points on top. */
+  function drawPose(group, a, bounds, scale) {
+    const color = classById(a.class_id)?.color ?? "#999999";
+    const selected = ui.selection.has(a.id);
+    const points = a.data.points;
+    const kids = [];
+    if (bounds) {
+      const pad = POSE_PAD_PX / scale;
+      kids.push(svgEl("rect", { class: "pose-box", x: bounds.minX - pad, y: bounds.minY - pad, width: bounds.w + 2 * pad, height: bounds.h + 2 * pad, fill: color, "fill-opacity": selected ? 0.18 : 0.06, stroke: selected ? color : "none", "stroke-width": 1.5, "stroke-dasharray": "5 4", "vector-effect": "non-scaling-stroke" }));
+    }
+    for (const [i, j] of classById(a.class_id)?.skeleton?.edges ?? []) {
+      const from = points[i];
+      const to = points[j];
+      if (!from || !to || from[2] === NOT_LABELLED || to[2] === NOT_LABELLED) continue;
+      kids.push(svgEl("line", { x1: from[0], y1: from[1], x2: to[0], y2: to[1], stroke: color, "stroke-width": 2, "stroke-dasharray": from[2] === HIDDEN || to[2] === HIDDEN ? "4 3" : "none", "vector-effect": "non-scaling-stroke", "pointer-events": "none" }));
+    }
+    for (const [x, y, v] of points) {
+      if (v === NOT_LABELLED) continue;
+      kids.push(svgEl("circle", { class: "kp-dot", cx: x, cy: y, r: KEYPOINT_RADIUS_PX / scale, fill: v === VISIBLE ? color : "none", stroke: v === VISIBLE ? "#fff" : color, "stroke-width": 1.5, "stroke-dasharray": v === HIDDEN ? "2 2" : "none", "vector-effect": "non-scaling-stroke", "pointer-events": "none" }));
+    }
+    group.replaceChildren(...kids);
   }
 
   function placeVertexHandles(points) {
@@ -261,6 +298,11 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       }
     } else if (chosen[0].kind === "polygon") {
       placeVertexHandles(chosen[0].data.points);
+    } else if (chosen[0].kind === "keypoints") {
+      chosen[0].data.points.forEach(([x, y], i) => {
+        const node = handleNodes.get(`k${i}`);
+        if (node) { node.setAttribute("cx", x); node.setAttribute("cy", y); }
+      });
     }
   }
 
@@ -272,12 +314,12 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     handleNodes = new Map();
     svg.replaceChildren();
     for (const a of state.annotations) {
-      if (a.kind !== "box" && a.kind !== "polygon") continue;
+      if (a.kind !== "box" && a.kind !== "polygon" && a.kind !== "keypoints") continue;
       const color = classById(a.class_id)?.color ?? "#999999";
       const selected = ui.selection.has(a.id);
       const group = svgEl("g", { class: `shape${selected ? " selected" : ""}`, "data-id": a.id });
       const look = { fill: color, "fill-opacity": selected ? 0.3 : 0.14, stroke: color, "stroke-width": selected ? 3 : 2, "vector-effect": "non-scaling-stroke" };
-      const main = a.kind === "box" ? svgEl("rect", look) : svgEl("polygon", { ...look, "stroke-linejoin": "round" });
+      const main = a.kind === "box" ? svgEl("rect", look) : a.kind === "keypoints" ? svgEl("g", { class: "pose" }) : svgEl("polygon", { ...look, "stroke-linejoin": "round" });
       const label = svgEl("text", { "font-size": 12 / scale });
       label.textContent = classById(a.class_id)?.name ?? "?";
       group.append(main, label);
@@ -314,6 +356,15 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
         svg.append(vertex);
       });
       placeVertexHandles(points);
+    } else if (chosen.length === 1 && chosen[0].kind === "keypoints") {
+      const a = chosen[0];
+      a.data.points.forEach(([x, y, v], i) => {
+        if (v === NOT_LABELLED) return;
+        const active = ui.vertex && ui.vertex.id === a.id && ui.vertex.index === i;
+        const node = svgEl("circle", { cx: x, cy: y, r: (KEYPOINT_RADIUS_PX + 3) / scale, class: `handle kp-handle${active ? " active" : ""}`, "data-kp": i, "data-id": a.id, "stroke-width": 2, "vector-effect": "non-scaling-stroke", style: "cursor:move" });
+        handleNodes.set(`k${i}`, node);
+        svg.append(node);
+      });
     }
     if (ui.draft) {
       const color = classById(activeClassId())?.color ?? "#999999";
@@ -328,6 +379,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   function renderPolygonDraft() {
     if (!draftLayer) return;
     draftLayer.replaceChildren();
+    renderKeypointDraft();
     if (!ui.poly || !ui.poly.points.length) return;
     const scale = ui.view.scale;
     const color = classById(activeClassId())?.color ?? "#999999";
@@ -343,6 +395,27 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     });
   }
 
+  /** The keypoints being placed, and the line that says which point comes next. */
+  function renderKeypointDraft() {
+    const kp = ui.kp;
+    kpHint.hidden = !kp;
+    if (!kp) return;
+    const cls = classById(kp.classId);
+    const names = cls?.skeleton?.names ?? [];
+    const scale = ui.view.scale;
+    const color = cls?.color ?? "#999999";
+    for (const [i, j] of cls?.skeleton?.edges ?? []) {
+      const from = kp.points[i];
+      const to = kp.points[j];
+      if (from && to && from[2] && to[2]) draftLayer.append(svgEl("line", { x1: from[0], y1: from[1], x2: to[0], y2: to[1], stroke: color, "stroke-width": 2, "vector-effect": "non-scaling-stroke" }));
+    }
+    for (const [x, y, v] of kp.points) {
+      if (v) draftLayer.append(svgEl("circle", { cx: x, cy: y, r: KEYPOINT_RADIUS_PX / scale, fill: v === VISIBLE ? color : "none", stroke: v === VISIBLE ? "#fff" : color, "stroke-width": 1.5, "stroke-dasharray": v === HIDDEN ? "2 2" : "none", "vector-effect": "non-scaling-stroke" }));
+    }
+    const name = names[kp.next] ?? `point ${kp.next + 1}`;
+    kpHint.textContent = `Place “${name}” (${kp.next + 1} of ${kp.points.length}) · click = visible · Shift+click = hidden · X = skip · Backspace = back · Enter = finish · Esc = cancel`;
+  }
+
   /** Rebuild `host` with `build()` and put keyboard focus back on the element that had it. */
   function rebuild(host, build) {
     const key = document.activeElement?.closest?.("[data-fk]")?.dataset.fk;
@@ -355,7 +428,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     const tool = (name, label, iconName, key) => el("button", { class: "btn btn-quiet btn-icon", type: "button", "aria-label": `${label} (${key})`, title: `${label} (${key})`, "aria-pressed": String(ui.tool === name), ...fk(`tool:${name}`), onclick: () => setTool(name) }, icon(iconName));
     const plain = (label, iconName, handler, disabled = false) => el("button", { class: "btn btn-quiet btn-icon", type: "button", "aria-label": label, title: label, disabled, ...fk(`btn:${label}`), onclick: handler }, icon(iconName));
     rebuild(toolstrip, () => [
-      tool("select", "Select", "cursor", "V"), tool("box", "Draw box", "box", "B"), tool("polygon", "Draw polygon", "polygon", "P"), tool("pan", "Pan", "move", "H"),
+      tool("select", "Select", "cursor", "V"), tool("box", "Draw box", "box", "B"), tool("polygon", "Draw polygon", "polygon", "P"), tool("keypoints", "Place keypoints", "keypoints", "K"), tool("pan", "Pan", "move", "H"),
       el("hr", { class: "tool-sep" }),
       plain("Zoom in (+)", "zoom-in", () => zoomStep(1.25)), plain("Zoom out (−)", "zoom-out", () => zoomStep(0.8)), plain("Fit to window (0)", "fit", fit),
       el("hr", { class: "tool-sep" }),
@@ -407,6 +480,17 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
                 el("button", { class: "btn btn-quiet btn-icon", type: "button", "aria-label": `Delete annotation ${i + 1}`, ...fk(`del:${a.id}`), onclick: () => deleteIds([a.id]) }, icon("trash")))))
             : el("p", { class: "hint", text: state.marked_empty ? "Marked as having no objects." : "Nothing drawn yet." })),
       );
+      // the points of the selected set of keypoints
+      const pose = selectedPointShape();
+      if (pose && pose.kind === "keypoints") {
+        parts.push(
+          el("div", { class: "a-section" }, el("h3", { text: "Points" }),
+            el("ul", { class: "kp-list" }, ...pose.data.points.map(([, , v], i) => el("li", {},
+              el("button", { class: "ann-row", type: "button", "aria-pressed": String(Boolean(ui.vertex && ui.vertex.id === pose.id && ui.vertex.index === i)), disabled: v === NOT_LABELLED, ...fk(`kp:${i}`), onclick: () => { ui.vertex = { id: pose.id, index: i }; renderShapes(); renderInspector(); } },
+                el("span", { class: "grow", text: pointName(pose, i) })),
+              el("button", { class: "btn btn-quiet kp-state", type: "button", "data-v": String(v), "aria-label": `${pointName(pose, i)}: ${VISIBILITY_NAMES[v]}. Change`, ...fk(`kpv:${i}`), onclick: () => cycleKeypoint(pose.id, i) }, VISIBILITY_NAMES[v]))))),
+        );
+      }
       // image-level actions
       parts.push(
         el("div", { class: "a-section a-actions" },
@@ -451,8 +535,9 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
 
   function pruneVertex() {
     if (!ui.vertex) return;
-    const polygon = selectedPolygon();
-    if (!polygon || polygon.id !== ui.vertex.id || ui.vertex.index >= polygon.data.points.length) ui.vertex = null;
+    const shape = selectedPointShape();
+    if (!shape || shape.id !== ui.vertex.id || ui.vertex.index >= shape.data.points.length) { ui.vertex = null; return; }
+    if (shape.kind === "keypoints" && shape.data.points[ui.vertex.index][2] === NOT_LABELLED) ui.vertex = null;
   }
 
   function renderAll() {
@@ -476,6 +561,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   }
   function undo() {
     if (ui.poly && ui.poly.points.length) { removeLastPolygonPoint(); return; } // Ctrl+Z while drawing
+    if (ui.kp) { removeLastKeypoint(); return; }
     if (!history.undo()) return;
     ui.preview = null;
     afterHistoryMove("Undone");
@@ -492,17 +578,18 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     renderAll();
     announce(message);
   }
-  /** True (with a message) while a polygon is half drawn: leaving would silently throw it away. */
+  /** True (with a message) while a polygon or a set of keypoints is half drawn: leaving would throw it away. */
   function blockWhileDrawing() {
-    if (!ui.poly || !ui.poly.points.length) return false;
-    toast("Finish the polygon (Enter) or cancel it (Esc) first.", { error: true });
+    const what = ui.poly?.points.length ? "polygon" : ui.kp ? "keypoints" : null;
+    if (!what) return false;
+    toast(`Finish the ${what} (Enter) or cancel it (Esc) first.`, { error: true });
     return true;
   }
   function setTool(name) {
-    if (name !== "polygon" && blockWhileDrawing()) return;
+    if (name !== ui.tool && blockWhileDrawing()) return;
     ui.tool = name;
     renderToolstrip();
-    announce(`${{ box: "Box", polygon: "Polygon", pan: "Pan" }[name] ?? "Select"} tool`);
+    announce(`${{ box: "Box", polygon: "Polygon", keypoints: "Keypoints", pan: "Pan" }[name] ?? "Select"} tool`);
     stage.focus({ preventScroll: true }); // so Enter / arrows / [ ] go to the canvas, not to the tool button
   }
   function needClass() {
@@ -639,18 +726,155 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     return found && found.kind === "polygon" ? found : null;
   }
 
+  /** The selected polygon or set of keypoints (the shapes whose points can be picked one by one). */
+  function selectedPointShape() {
+    if (ui.selection.size !== 1) return null;
+    const id = [...ui.selection][0];
+    const found = current().annotations.find((a) => a.id === id);
+    return found && (found.kind === "polygon" || found.kind === "keypoints") ? found : null;
+  }
+  const pointName = (shape, index) => classById(shape.class_id)?.skeleton?.names?.[index] ?? `Point ${index + 1}`;
+
   function stepVertex(direction) {
-    const polygon = selectedPolygon();
-    if (!polygon) return false;
-    const count = polygon.data.points.length;
-    const index = ui.vertex && ui.vertex.id === polygon.id ? (ui.vertex.index + direction + count) % count : direction > 0 ? 0 : count - 1;
-    ui.vertex = { id: polygon.id, index };
+    const shape = selectedPointShape();
+    if (!shape) return false;
+    const points = shape.data.points;
+    const usable = points.map((_, i) => i).filter((i) => shape.kind === "polygon" || points[i][2] !== NOT_LABELLED);
+    if (!usable.length) return false;
+    const at = ui.vertex && ui.vertex.id === shape.id ? usable.indexOf(ui.vertex.index) : -1;
+    const index = usable[at < 0 ? (direction > 0 ? 0 : usable.length - 1) : (at + direction + usable.length) % usable.length];
+    ui.vertex = { id: shape.id, index };
     renderShapes();
-    announce(`Point ${index + 1} of ${count}`);
+    announce(shape.kind === "keypoints" ? `${pointName(shape, index)}, ${VISIBILITY_NAMES[points[index][2]]}` : `Point ${index + 1} of ${points.length}`);
+    return true;
+  }
+
+  // ---- keypoints --------------------------------------------------------------------------
+  let lastKeypointAt = -1e9;
+
+  /** Start a new set of keypoints for the active class, or explain why that is not possible. */
+  function beginKeypoints() {
+    if (ui.kp) return ui.kp;
+    const cls = classById(activeClassId());
+    if (!cls) { needClass(); return null; }
+    if (!cls.skeleton) {
+      toast(`Class “${cls.name}” has no keypoints yet. Edit the class and list its points.`, { error: true, actionLabel: "Edit class", onAction: () => editClass(cls) });
+      return null;
+    }
+    if (!canAdd()) return null;
+    ui.kp = { classId: cls.id, points: cls.skeleton.names.map(() => [0, 0, NOT_LABELLED]), next: 0 };
+    return ui.kp;
+  }
+
+  function placeKeypointAt(p, hidden) {
+    const kp = beginKeypoints();
+    if (!kp) return;
+    const point = [clamp(p.x, 0, width), clamp(p.y, 0, height)];
+    const previous = kp.points[kp.next - 1];
+    // 2nd half of an accidental double-click: same spot, moments later
+    if (previous && previous[2] && performance.now() - lastKeypointAt < DOUBLE_CLICK_GUARD_MS && screenGap(point, previous) < MIN_POINT_GAP_PX) return;
+    lastKeypointAt = performance.now();
+    kp.points[kp.next] = [point[0], point[1], hidden ? HIDDEN : VISIBLE];
+    kp.next += 1;
+    afterKeypointStep();
+  }
+
+  function skipKeypoint() {
+    const kp = beginKeypoints();
+    if (!kp) return;
+    kp.points[kp.next] = [0, 0, NOT_LABELLED];
+    kp.next += 1;
+    afterKeypointStep();
+  }
+
+  function afterKeypointStep() {
+    const kp = ui.kp;
+    if (kp.next >= kp.points.length) { finishKeypoints(); return; }
+    renderShapes();
+    const cls = classById(kp.classId);
+    announce(`Next: ${cls?.skeleton?.names?.[kp.next] ?? `point ${kp.next + 1}`}, ${kp.next + 1} of ${kp.points.length}`);
+  }
+
+  function removeLastKeypoint() {
+    const kp = ui.kp;
+    if (!kp) return;
+    if (kp.next > 0) { kp.next -= 1; kp.points[kp.next] = [0, 0, NOT_LABELLED]; }
+    if (kp.next === 0) ui.kp = null;
+    renderShapes();
+  }
+
+  function cancelKeypoints() {
+    ui.kp = null;
+    renderShapes();
+    announce("Keypoints cancelled");
+  }
+
+  function finishKeypoints() {
+    const kp = ui.kp;
+    if (!kp) return;
+    const placed = kp.points.filter((point) => point[2] !== NOT_LABELLED).length;
+    if (!placed) { toast("Place at least one point first.", { error: true }); return; }
+    if (!canAdd()) { ui.kp = null; renderShapes(); return; }
+    const id = newId();
+    ui.kp = null;
+    commit(addKeypoints(history.present, id, kp.classId, kp.points));
+    ui.selection = new Set([id]);
+    ui.vertex = null;
+    renderAll();
+    announce(`Keypoints added, ${placed} of ${kp.points.length} points placed`);
+  }
+
+  /** Keyboard-only: drop a whole pose in the middle of the view, then pick points with [ ] and move them with the arrows. */
+  function keypointsAtCentre() {
+    const cls = classById(activeClassId());
+    if (!cls) { needClass(); return; }
+    if (!cls.skeleton) { toast(`Class “${cls.name}” has no keypoints yet. Edit the class and list its points.`, { error: true }); return; }
+    if (!canAdd()) return;
+    const r = stageRect();
+    const visible = visibleRect(ui.view, r.width, r.height, width, height);
+    const points = defaultKeypoints(cls.skeleton.names.length, visible.x + visible.w / 2, visible.y + visible.h / 2, visible.w, visible.h, width, height);
+    const id = newId();
+    commit(addKeypoints(history.present, id, cls.id, points));
+    ui.selection = new Set([id]);
+    renderAll();
+    announce("Keypoints added. Press ] to pick a point, then use the arrow keys to move it. O changes whether it is visible, hidden or not labelled.");
+  }
+
+  /** Make point `index` of a set not labelled (refused when it is the last labelled point). */
+  function clearKeypoint(id, index) {
+    const next = setKeypointVisibility(history.present, id, index, NOT_LABELLED);
+    if (next === history.present) { toast("A set of keypoints needs at least one labelled point. Delete the whole set instead.", { error: true }); return false; }
+    commit(next);
+    ui.vertex = null;
+    renderAll();
+    return true;
+  }
+
+  /** Change one point's visibility: visible -> hidden -> not labelled -> visible. */
+  function cycleKeypoint(id, index) {
+    const shape = history.present.annotations.find((a) => a.id === id && a.kind === "keypoints");
+    if (!shape || !shape.data.points[index]) return;
+    const to = nextVisibility(shape.data.points[index][2]);
+    if (to === NOT_LABELLED) { if (clearKeypoint(id, index)) announce(`${pointName(shape, index)} not labelled`); return; }
+    const r = stageRect();
+    const visible = visibleRect(ui.view, r.width, r.height, width, height);
+    const bounds = keypointsBounds(shape.data.points);
+    const fallback = bounds ? [bounds.minX + bounds.w / 2, bounds.minY + bounds.h / 2] : [visible.x + visible.w / 2, visible.y + visible.h / 2];
+    commit(setKeypointVisibility(history.present, id, index, to, fallback));
+    ui.vertex = { id, index };
+    renderAll();
+    announce(`${pointName(shape, index)} ${VISIBILITY_NAMES[to]}`);
+  }
+
+  function cycleCurrentKeypoint() {
+    const shape = selectedPointShape();
+    if (!shape || shape.kind !== "keypoints" || !ui.vertex) return false;
+    cycleKeypoint(shape.id, ui.vertex.index);
     return true;
   }
 
   function deleteVertex(id, index) {
+    if (history.present.annotations.find((a) => a.id === id)?.kind === "keypoints") { clearKeypoint(id, index); return; }
     const next = removeVertex(history.present, id, index);
     if (next === history.present) { toast("A polygon needs at least 3 points. Delete the whole polygon instead.", { error: true }); return; }
     if (!commitPolygonEdit(next, id)) return;
@@ -675,6 +899,13 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   }
 
   function nudgeVertex(dx, dy) {
+    const shape = selectedPointShape();
+    if (shape && shape.kind === "keypoints" && ui.vertex) {
+      const point = shape.data.points[ui.vertex.index];
+      if (!point || point[2] === NOT_LABELLED) { ui.vertex = null; return; }
+      commit(placeKeypoint(history.present, shape.id, ui.vertex.index, point[0] + dx, point[1] + dy, point[2], width, height), { key: `kpnudge:${ui.vertex.index}` });
+      return;
+    }
     const polygon = selectedPolygon();
     if (!polygon || !ui.vertex) return;
     const point = polygon.data.points[ui.vertex.index];
@@ -713,8 +944,12 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   };
 
   function annotationLabel(a, i) {
-    const kind = a.kind === "box" ? "Box" : a.kind === "polygon" ? "Polygon" : a.kind;
+    const kind = a.kind === "box" ? "Box" : a.kind === "polygon" ? "Polygon" : a.kind === "keypoints" ? "Keypoints" : a.kind;
     let detail = "";
+    if (a.kind === "keypoints") {
+      const placed = a.data.points.filter((point) => point[2] !== NOT_LABELLED).length;
+      detail = ` · ${placed} of ${a.data.points.length} points`;
+    }
     if (a.kind === "polygon") {
       const crossing = a.data.points.length <= 300 && crossingOf(a.data.points);
       detail = ` · ${a.data.points.length} points${crossing ? " · crosses itself" : ""}`;
@@ -753,6 +988,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       return;
     }
     classes = await api(`/api/projects/${projectId}/classes`);
+    ui.kp = null; // its skeleton may just have changed
     if (kind === "created" && ui.activeClass === null) ui.activeClass = classes[0]?.id ?? null;
     renderAll();
   }
@@ -839,6 +1075,15 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       addPolygonPoint(p);
       return;
     }
+    if (ui.tool === "keypoints") {
+      if (activeClassId() === null) {
+        ui.drag = { type: "needclass" };
+        stage.setPointerCapture(event.pointerId);
+        return;
+      }
+      placeKeypointAt(p, event.shiftKey);
+      return;
+    }
     if (ui.tool === "box") {
       if (activeClassId() === null) {
         // Do not open the dialog on press: the release would land on it and steal its focus.
@@ -849,6 +1094,18 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       ui.drag = { type: "draw", x0: p.x, y0: p.y };
       ui.draft = boxFromPoints(p.x, p.y, p.x, p.y, width, height);
       stage.setPointerCapture(event.pointerId);
+      return;
+    }
+    const kpNode = event.target.closest?.("[data-kp]");
+    if (kpNode) {
+      const id = kpNode.dataset.id;
+      const index = Number(kpNode.dataset.kp);
+      if (event.altKey) { clearKeypoint(id, index); return; } // Alt+click makes a point "not labelled"
+      const shape = history.present.annotations.find((a) => a.id === id);
+      ui.vertex = { id, index };
+      ui.drag = { type: "kpoint", id, index, v: shape?.data.points[index]?.[2] ?? VISIBLE, start: history.present, moved: false };
+      stage.setPointerCapture(event.pointerId);
+      renderShapes();
       return;
     }
     const vertexNode = event.target.closest?.("[data-vertex]");
@@ -920,6 +1177,10 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     } else if (drag.type === "resize") {
       drag.moved = true;
       ui.preview = resizeAnnotationTo(drag.start, drag.id, drag.handle, p.x, p.y, width, height, minBox());
+      updateGeometry();
+    } else if (drag.type === "kpoint") {
+      drag.moved = true;
+      ui.preview = placeKeypoint(drag.start, drag.id, drag.index, p.x, p.y, drag.v, width, height);
       updateGeometry();
     } else if (drag.type === "vertex") {
       drag.moved = true;
@@ -1000,6 +1261,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     if (lower === "v") setTool("select");
     else if (lower === "b") setTool("box");
     else if (lower === "p") setTool("polygon");
+    else if (lower === "k") setTool("keypoints");
     else if (lower === "h") setTool("pan");
     else if (key === "0") fit();
     else if (key === "+" || key === "=") zoomStep(1.25);
@@ -1011,14 +1273,19 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     else if ((key === "Delete" || key === "Backspace") && onStage) {
       event.preventDefault();
       if (ui.poly) removeLastPolygonPoint();
+      else if (ui.kp) removeLastKeypoint();
       else if (ui.vertex) deleteVertex(ui.vertex.id, ui.vertex.index);
       else deleteSelection();
     } else if (key === "Escape") {
       if (ui.drag) { event.preventDefault(); finishDrag({ pointerId: -1 }, true); }
       else if (ui.poly) { event.preventDefault(); ui.poly = null; renderShapes(); announce("Polygon cancelled"); }
+      else if (ui.kp) { event.preventDefault(); cancelKeypoints(); }
       else if (ui.vertex) { event.preventDefault(); ui.vertex = null; renderShapes(); }
       else if (ui.selection.size) { event.preventDefault(); ui.selection.clear(); renderAll(); }
     } else if (key === "Enter" && onStage && ui.tool === "polygon") { event.preventDefault(); if (ui.poly) finishPolygon(); else polygonAtCentre(); }
+    else if (key === "Enter" && onStage && ui.tool === "keypoints") { event.preventDefault(); if (ui.kp) finishKeypoints(); else keypointsAtCentre(); }
+    else if (lower === "x" && onStage && ui.tool === "keypoints") { event.preventDefault(); skipKeypoint(); }
+    else if (lower === "o" && onStage) { if (cycleCurrentKeypoint()) event.preventDefault(); }
     else if (key === "Enter" && onStage && ui.tool === "box") { event.preventDefault(); boxAtCentre(); }
     else if ((key === "[" || key === "]") && onStage) { if (stepVertex(key === "]" ? 1 : -1)) event.preventDefault(); }
     else if (lower === "i" && onStage) { if (insertVertexAfterCurrent()) event.preventDefault(); }

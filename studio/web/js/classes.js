@@ -1,6 +1,7 @@
 // Dialog to create, rename, recolour and delete a class. Shared by the annotator and the gallery.
 import { api } from "./api.js";
 import { limits } from "./limits.js";
+import { PRESETS, parseSkeleton, skeletonToText } from "./skeleton.js";
 import { confirmDialog, el, enableRadioArrows, openDialog, plural, rovingTabindex, toast } from "./ui.js";
 
 /**
@@ -36,16 +37,39 @@ export function openClassDialog({ projectId, existing = null, onChanged }) {
   const problem = el("p", { class: "error-text", role: "alert" });
   let handle;
 
+  // Keypoints (optional): the named points of one object, and which of them are joined by a line.
+  const initial = skeletonToText(existing?.skeleton ?? null);
+  const pointsBox = el("textarea", { class: "input", id: "class-points", rows: "6", spellcheck: "false", placeholder: "One point per line, for example:\nhead\nneck\ntail" });
+  const linksBox = el("textarea", { class: "input", id: "class-links", rows: "4", spellcheck: "false", placeholder: "One connection per line, for example:\nhead - neck\nneck - tail" });
+  pointsBox.value = initial.points;
+  linksBox.value = initial.connections;
+  const usePreset = (preset) => { const text = skeletonToText(preset); pointsBox.value = text.points; linksBox.value = text.connections; };
+  const keypointFields = el("details", { class: "kp-fields", open: Boolean(existing?.skeleton) },
+    el("summary", { text: "Keypoints (optional)" }),
+    el("p", { class: "hint", text: "List the points of one object in the order you will click them. Needed for the keypoint tool (K)." }),
+    el("div", { class: "row wrap" }, ...Object.entries(PRESETS).map(([name, preset]) => el("button", { class: "btn", type: "button", text: `Start from: ${name}`, onclick: () => usePreset(preset) }))),
+    el("div", { class: "field" }, el("label", { for: "class-points", text: "Points" }), pointsBox),
+    el("div", { class: "field" }, el("label", { for: "class-links", text: "Connections (drawn as lines)" }), linksBox),
+  );
+
   const save = async () => {
     problem.textContent = "";
+    const parsed = parseSkeleton(pointsBox.value, linksBox.value, { maxPoints: limits.max_keypoints, nameMax: limits.skeleton_name_max });
+    if (parsed.error) {
+      keypointFields.open = true;
+      problem.textContent = parsed.error;
+      pointsBox.focus();
+      return;
+    }
+    const skeleton = parsed.skeleton;
     try {
       if (existing) {
-        await api(`/api/classes/${existing.id}`, { method: "PATCH", body: { name: input.value, ...(color ? { color } : {}) } });
+        await api(`/api/classes/${existing.id}`, { method: "PATCH", body: { name: input.value, ...(color ? { color } : {}), skeleton } });
         handle.close("saved");
         toast(`Saved class “${input.value.trim()}”`);
         onChanged("updated");
       } else {
-        await api(`/api/projects/${projectId}/classes`, { method: "POST", body: { name: input.value, ...(color ? { color } : {}) } });
+        await api(`/api/projects/${projectId}/classes`, { method: "POST", body: { name: input.value, ...(color ? { color } : {}), ...(skeleton ? { skeleton } : {}) } });
         handle.close("saved");
         toast(`Added class “${input.value.trim()}”`);
         onChanged("created");
@@ -91,6 +115,7 @@ export function openClassDialog({ projectId, existing = null, onChanged }) {
     body: [
       el("div", { class: "field" }, el("label", { for: "class-name", text: "Name" }), input),
       el("div", { class: "field" }, el("span", { class: "label-text", text: "Colour" }), swatches),
+      keypointFields,
       problem,
       ...(existing ? [el("button", { class: "btn btn-danger", type: "button", text: "Delete class…", onclick: remove })] : []),
     ],

@@ -14,7 +14,11 @@ export const SHORTCUTS = [
 ];
 
 export const ANNOTATOR_SHORTCUTS = [
-  ["Select / Box / Polygon / Pan tool", ["V", "B", "P", "H"]],
+  ["Select / Box / Polygon / Keypoints / Pan tool", ["V", "B", "P", "K", "H"]],
+  ["Keypoints: place the next point (hidden), skip it, step back", ["click (Shift+click)", "X", "Backspace"]],
+  ["Keypoints: finish early, drop a whole pose with the keyboard", ["Enter"]],
+  ["Keypoints: pick a point, change visible / hidden / not labelled", ["[ ]", "O"]],
+  ["Keypoints: make the selected point not labelled", ["Delete", "Alt+click"]],
   ["Polygon: add points, close it", ["click", "first point / Enter / double-click"]],
   ["Polygon: remove last point, cancel", ["Backspace", "Esc"]],
   ["Polygon: select a point, add a point after it", ["[ ]", "I"]],

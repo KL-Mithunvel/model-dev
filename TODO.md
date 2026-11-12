@@ -36,7 +36,8 @@
 - [x] Stage 2 v0.3 (polygons) built; 18 polygon unit tests, `annotate_polygon` scenario (34 checks), perf with 200 polygons.
 - [x] v0.3 independent review: PASS with 9 SHOULD findings, all fixed (scenario `annotate_polygon_review`, 16 checks).
 - [ ] Owner to approve the `v0.3` tag.
-- [ ] Stage 2 v0.4 (keypoints): after v0.3 is tagged.
+- [x] Stage 2 v0.4 (keypoints) built 2026-11-13 (class skeletons, placement, editing, skeleton editor); `annotate_keypoints` 29/29.
+- [ ] v0.4: independent review, then owner approval of the `v0.3` and `v0.4` tags (the tag command was blocked during the overnight run; nothing is tagged yet).
 - [ ] dev_run: pace default for visible runs was chosen by me (1.0, `--pace 0` for instant) because the owner did not answer; confirm or change.
 - [ ] v0.1 follow-ups (technical debt in CLAUDE.md): parallel import, move browser checks into a real test runner, `httpx2` for the test client (install was blocked), orphan-file sweeper.
 - [x] G1: wrote `docs/FEATURES.md` and `docs/FORMATS.md` (2026-11-06). Cleared for planning.

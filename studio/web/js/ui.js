@@ -35,6 +35,7 @@ const ICONS = {
   cursor: "M5 3l14 7-6 2-2 6z",
   polygon: "M12 3l8 6-3 11H7L4 9z",
   box: "M4 5h16v14H4z",
+  keypoints: "M12 5v.01M6 10v.01M18 10v.01M9 19v.01M15 19v.01M12 5l-6 5m6-5 6 5M12 5v7m0 0-3 7m3-7 3 7",
   move: "M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3",
   undo: "M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3",
   redo: "M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3",

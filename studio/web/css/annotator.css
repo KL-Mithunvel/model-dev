@@ -92,3 +92,22 @@
 .overlay .poly-dot { stroke: var(--surface); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
 .overlay .poly-dot.close-target { stroke: var(--text); }
 .overlay .poly-dot.hot { stroke: var(--accent); stroke-width: 3px; }
+
+/* keypoints */
+.stage[data-tool="keypoints"], .stage[data-tool="polygon"] { cursor: crosshair; }
+.overlay .shape .pose-box { cursor: move; }
+.overlay .kp-dot { pointer-events: none; }
+.overlay .handle.kp-handle { fill: transparent; stroke: var(--accent); }
+.overlay .handle.kp-handle.active { fill: var(--accent); fill-opacity: 0.35; }
+.kp-hint {
+  position: absolute; z-index: 4; left: 50%; bottom: var(--sp-2); transform: translateX(-50%); max-width: calc(100% - 2 * var(--sp-3));
+  background: var(--bar-bg); border: 1px solid var(--border); border-radius: var(--r-2, 10px); padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-12); text-align: center; pointer-events: none;
+}
+.kp-list { display: flex; flex-direction: column; gap: 2px; list-style: none; margin: 0; padding: 0; }
+.kp-list li { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+.kp-state { font-size: var(--fs-12); white-space: nowrap; }
+.kp-state[data-v="0"] { color: var(--text-2); }
+textarea.input { resize: vertical; font-family: inherit; line-height: 1.4; }
+.kp-fields summary { cursor: pointer; font-weight: 600; margin-bottom: var(--sp-2); }
+.kp-fields .row { margin-bottom: var(--sp-2); }

@@ -183,6 +183,53 @@ def validate_set(
         raise AnnotationError("An image with annotations cannot be marked as having no objects.")
 
 
+def validate_skeleton(skeleton: Any, max_keypoints: int, name_max: int) -> dict[str, Any]:
+    """Return the cleaned skeleton ``{"names": [...], "edges": [[i, j], ...]}`` or raise.
+
+    Names are trimmed, non-empty, unique ignoring case; edges join two different points
+    (0-based indexes into ``names``) and are stored once, smaller index first.
+    """
+    if not isinstance(skeleton, Mapping) or set(skeleton) - {"names", "edges"}:
+        raise AnnotationError("A skeleton is an object with 'names' and 'edges'.")
+    names = skeleton.get("names")
+    edges = skeleton.get("edges", [])
+    if not isinstance(names, Sequence) or isinstance(names, (str, bytes)) or not names:
+        raise AnnotationError("A skeleton needs at least one point name.")
+    if len(names) > max_keypoints:
+        raise AnnotationError(f"A skeleton can have at most {max_keypoints} points.")
+    cleaned_names: list[str] = []
+    seen: set[str] = set()
+    for index, name in enumerate(names, start=1):
+        if not isinstance(name, str) or not " ".join(name.split()):
+            raise AnnotationError(f"Skeleton point {index} needs a name.")
+        text = " ".join(name.split())
+        if len(text) > name_max:
+            raise AnnotationError(
+                f"Skeleton point {index}: name is longer than {name_max} characters."
+            )
+        if text.casefold() in seen:
+            raise AnnotationError(f"Skeleton point name '{text}' is used twice.")
+        seen.add(text.casefold())
+        cleaned_names.append(text)
+    if not isinstance(edges, Sequence) or isinstance(edges, (str, bytes)):
+        raise AnnotationError("Skeleton edges must be a list.")
+    cleaned_edges: list[list[int]] = []
+    for edge in edges:
+        if (
+            not isinstance(edge, Sequence)
+            or isinstance(edge, (str, bytes))
+            or len(edge) != 2
+            or any(isinstance(v, bool) or not isinstance(v, int) for v in edge)
+        ):
+            raise AnnotationError("Each skeleton edge must be two point numbers.")
+        a, b = sorted(edge)
+        if a < 0 or b >= len(cleaned_names) or a == b:
+            raise AnnotationError("A skeleton edge must join two different points of the skeleton.")
+        if [a, b] not in cleaned_edges:
+            cleaned_edges.append([a, b])
+    return {"names": cleaned_names, "edges": cleaned_edges}
+
+
 def dumps(data: Mapping[str, Any]) -> str:
     """Stable JSON for storage."""
     return json.dumps(data, separators=(",", ":"), sort_keys=True)

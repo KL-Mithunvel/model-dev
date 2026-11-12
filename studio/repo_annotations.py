@@ -91,8 +91,16 @@ def list_classes(conn: sqlite3.Connection, project_id: int) -> list[dict[str, An
     return [_class_dict(row, _usage(conn, row["id"])) for row in rows]
 
 
+UNSET: Any = object()  # "argument not given" (None means "remove the skeleton")
+
+
 def create_class(
-    conn: sqlite3.Connection, project_id: int, name: str, color: str | None, palette: Sequence[str]
+    conn: sqlite3.Connection,
+    project_id: int,
+    name: str,
+    color: str | None,
+    palette: Sequence[str],
+    skeleton: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create a class. Without ``color`` the first unused palette colour is taken."""
     rows = conn.execute("SELECT color FROM classes WHERE project_id = ?", (project_id,)).fetchall()
@@ -107,9 +115,12 @@ def create_class(
     ).fetchone()[0]
     try:
         cursor = conn.execute(
-            "INSERT INTO classes (project_id, name, color, position, created_at)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (project_id, name, color.upper(), position, utc_now()),
+            "INSERT INTO classes (project_id, name, color, position, skeleton, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                project_id, name, color.upper(), position,
+                validation.dumps(skeleton) if skeleton else None, utc_now(),
+            ),
         )
     except sqlite3.IntegrityError as error:
         raise ClassExists(f"A class named '{name}' already exists.") from error
@@ -123,18 +134,40 @@ def update_class(
     name: str | None,
     color: str | None,
     position: int | None,
+    skeleton: Any = UNSET,
 ) -> dict[str, Any] | None:
-    """Change a class's name, colour or position. Returns None if it does not exist."""
+    """Change a class's name, colour, position or skeleton. None if it does not exist.
+
+    ``skeleton`` is already cleaned; ``None`` removes it, ``UNSET`` leaves it alone. Once the class
+    has keypoint annotations the number of points cannot change (the stored points would no
+    longer line up with the names).
+    """
     current = conn.execute("SELECT * FROM classes WHERE id = ?", (class_id,)).fetchone()
     if current is None:
         return None
+    skeleton_json = current["skeleton"]
+    if skeleton is not UNSET:
+        old = json.loads(current["skeleton"]) if current["skeleton"] else None
+        used = conn.execute(
+            "SELECT COUNT(*) FROM annotations WHERE class_id = ? AND kind = 'keypoints'",
+            (class_id,),
+        ).fetchone()[0]
+        old_count = len(old["names"]) if old else None
+        new_count = len(skeleton["names"]) if skeleton else None
+        if used and old_count != new_count:
+            raise ValueError(
+                f"{used} keypoint annotation(s) use this skeleton, so its number of points cannot "
+                "change. Rename points or change edges, or delete those annotations first."
+            )
+        skeleton_json = validation.dumps(skeleton) if skeleton else None
     try:
         conn.execute(
-            "UPDATE classes SET name = ?, color = ?, position = ? WHERE id = ?",
+            "UPDATE classes SET name = ?, color = ?, position = ?, skeleton = ? WHERE id = ?",
             (
                 name if name is not None else current["name"],
                 color.upper() if color is not None else current["color"],
                 position if position is not None else current["position"],
+                skeleton_json,
                 class_id,
             ),
         )

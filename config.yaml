@@ -42,6 +42,8 @@ gallery:
 annotations:
   max_per_image: 2000
   max_points: 2000               # vertices per polygon / points per keypoint instance
+  max_keypoints: 64              # points in one class's skeleton
+  skeleton_name_max: 40          # characters in a keypoint name
   min_box_px: 1                  # smallest box side the server accepts
   min_polygon_area_px: 1         # polygons flatter than this are rejected
   simplify_epsilon_px: 2         # 'Simplify polygon' drops points within this distance of the outline

@@ -53,12 +53,14 @@ class SetSplitRequest(BaseModel):
 class ClassCreate(BaseModel):
     name: str
     color: str | None = None
+    skeleton: dict[str, Any] | None = None
 
 
 class ClassUpdate(BaseModel):
     name: str | None = None
     color: str | None = None
     position: StrictInt | None = Field(default=None, ge=0, le=10**9)
+    skeleton: dict[str, Any] | None = None  # send null to remove; leave out to keep
 
 
 class AnnotationItem(BaseModel):
@@ -144,6 +146,8 @@ def create_app(
             "min_box_px": config["annotations"]["min_box_px"],
             "min_polygon_area_px": config["annotations"]["min_polygon_area_px"],
             "simplify_epsilon_px": config["annotations"]["simplify_epsilon_px"],
+            "max_keypoints": config["annotations"]["max_keypoints"],
+            "skeleton_name_max": config["annotations"]["skeleton_name_max"],
             "max_annotations": config["annotations"]["max_per_image"],
             "filmstrip_size": config["annotations"]["filmstrip_size"],
         }
@@ -342,6 +346,15 @@ def create_app(
         return {"tags": tags}
 
     # ---- classes ----------------------------------------------------------------------------
+    def clean_skeleton(raw: dict[str, Any]) -> dict[str, Any]:
+        settings = config["annotations"]
+        try:
+            return annotations.validate_skeleton(
+                raw, settings["max_keypoints"], settings["skeleton_name_max"]
+            )
+        except annotations.AnnotationError as error:
+            raise ValueError(str(error)) from error
+
     @app.get("/api/projects/{project_id}/classes")
     def get_classes(project_id: ID, conn: sqlite3.Connection = Conn) -> list[dict[str, Any]]:
         need_project(conn, project_id)
@@ -356,8 +369,9 @@ def create_app(
             max_length = config["projects"]["max_name_length"]
             name = annotations_repo.clean_class_name(body.name, max_length)
             color = annotations_repo.clean_color(body.color) if body.color else None
+            skeleton = clean_skeleton(body.skeleton) if body.skeleton else None
             return annotations_repo.create_class(
-                conn, project_id, name, color, config["annotations"]["palette"]
+                conn, project_id, name, color, config["annotations"]["palette"], skeleton
             )
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
@@ -374,7 +388,12 @@ def create_app(
                 if body.name is not None else None
             )
             color = annotations_repo.clean_color(body.color) if body.color is not None else None
-            updated = annotations_repo.update_class(conn, class_id, name, color, body.position)
+            skeleton = annotations_repo.UNSET
+            if "skeleton" in body.model_fields_set:
+                skeleton = clean_skeleton(body.skeleton) if body.skeleton else None
+            updated = annotations_repo.update_class(
+                conn, class_id, name, color, body.position, skeleton
+            )
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
         except annotations_repo.ClassExists as error:

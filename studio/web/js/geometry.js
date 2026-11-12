@@ -268,3 +268,67 @@ export function defaultPolygon(cx, cy, visibleW, visibleH, width, height, sides 
   }
   return movePolygon(points, 0, 0, width, height).map(([x, y]) => clampPoint(x, y, width, height));
 }
+
+// ---- keypoints ------------------------------------------------------------------------------
+// Keypoints are [x, y, v] with v 0 = not labelled (position 0,0 and meaningless), 1 = labelled but
+// hidden, 2 = visible. Only labelled points (v > 0) have a place in the image.
+
+export const NOT_LABELLED = 0;
+export const HIDDEN = 1;
+export const VISIBLE = 2;
+
+export const roundKeypoints = (points) =>
+  points.map(([x, y, v]) => (v === NOT_LABELLED ? [0, 0, 0] : [round2(x), round2(y), v]));
+
+const labelled = (points) => points.filter((p) => p[2] > NOT_LABELLED);
+
+/** Bounds of the labelled points, or null when none is labelled. */
+export function keypointsBounds(points) {
+  const placed = labelled(points);
+  return placed.length ? polygonBounds(placed) : null;
+}
+
+/** Translate labelled points rigidly; the group stops at the image edges. Unlabelled stay put. */
+export function moveKeypoints(points, dx, dy, width, height) {
+  const bounds = keypointsBounds(points);
+  if (!bounds) return points;
+  const safeDx = clamp(dx, -bounds.minX, width - bounds.maxX);
+  const safeDy = clamp(dy, -bounds.minY, height - bounds.maxY);
+  return points.map(([x, y, v]) => (v === NOT_LABELLED ? [0, 0, 0] : [x + safeDx, y + safeDy, v]));
+}
+
+/** The next visibility when the user cycles one point: visible -> hidden -> not labelled -> visible. */
+export const nextVisibility = (v) => (v === VISIBLE ? HIDDEN : v === HIDDEN ? NOT_LABELLED : VISIBLE);
+
+/** Index of the labelled point closest to (x, y) within `radius` image pixels, or -1. */
+export function nearestKeypoint(points, x, y, radius) {
+  let best = -1;
+  let bestDistance = radius;
+  points.forEach(([px, py, v], index) => {
+    if (v === NOT_LABELLED) return;
+    const distance = Math.hypot(px - x, py - y);
+    if (distance <= bestDistance) { best = index; bestDistance = distance; }
+  });
+  return best;
+}
+
+/** Index of the first point still to place (v 0) at or after `from`, or -1. */
+export function nextUnplaced(points, from = 0) {
+  for (let i = from; i < points.length; i++) if (points[i][2] === NOT_LABELLED) return i;
+  return -1;
+}
+
+/**
+ * A default pose to drop with the keyboard: points on a small ellipse around the view centre,
+ * all visible, so they can be moved with [ ] and the arrow keys.
+ */
+export function defaultKeypoints(count, cx, cy, visibleW, visibleH, width, height, fraction = 0.2) {
+  const rx = Math.max(2, Math.min(visibleW, width) * fraction);
+  const ry = Math.max(2, Math.min(visibleH, height) * fraction);
+  const centreX = clamp(cx, rx, Math.max(rx, width - rx));
+  const centreY = clamp(cy, ry, Math.max(ry, height - ry));
+  return Array.from({ length: count }, (_, i) => {
+    const angle = (2 * Math.PI * i) / count - Math.PI / 2;
+    return [round2(centreX + rx * Math.cos(angle)), round2(centreY + ry * Math.sin(angle)), VISIBLE];
+  });
+}

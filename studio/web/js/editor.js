@@ -8,7 +8,8 @@
 // }
 
 import {
-  clampPoint, movePolygon, moveBox, resizeBoxBy, resizeBoxTo, roundBox, roundPoints, simplifyPolygon,
+  NOT_LABELLED, clamp, clampPoint, movePolygon, moveBox, moveKeypoints, resizeBoxBy, resizeBoxTo,
+  roundBox, roundKeypoints, roundPoints, simplifyPolygon,
 } from "./geometry.js";
 
 export const emptyState = () => ({ annotations: [], marked_empty: false, label_class_id: null });
@@ -84,10 +85,13 @@ function translated(annotation, dx, dy, width, height) {
   if (annotation.kind === "polygon") {
     return { points: roundPoints(movePolygon(annotation.data.points, dx, dy, width, height)) };
   }
+  if (annotation.kind === "keypoints") {
+    return { points: roundKeypoints(moveKeypoints(annotation.data.points, dx, dy, width, height)) };
+  }
   return annotation.data;
 }
 
-/** Move boxes and polygons by (dx, dy), clamped to the image. */
+/** Move boxes, polygons and keypoint sets by (dx, dy), clamped to the image. */
 export function moveAnnotations(state, ids, dx, dy, width, height) {
   const target = isTarget(ids);
   return withAnnotations(
@@ -242,4 +246,47 @@ export function simplifyAnnotation(state, id, epsilon) {
   const reduced = simplifyPolygon(polygon.data.points, epsilon);
   if (reduced.length >= before) return { state, before, after: before };
   return { state: mapPolygon(state, id, () => reduced), before, after: reduced.length };
+}
+
+// ---- keypoints ------------------------------------------------------------------------------
+
+export function addKeypoints(state, id, classId, points) {
+  return addAnnotation(state, { id, class_id: classId, kind: "keypoints", data: { points: roundKeypoints(points) } });
+}
+
+const mapKeypoints = (state, id, change) =>
+  withAnnotations(
+    state,
+    state.annotations.map((a) => (a.id === id && a.kind === "keypoints" ? { ...a, data: { points: roundKeypoints(change(a.data.points)) } } : a)),
+  );
+
+/**
+ * Put point `index` at (x, y) with visibility `v` (1 or 2), inside the image. Used to place a
+ * point for the first time and to drag it; a point that was not labelled becomes labelled.
+ */
+export function placeKeypoint(state, id, index, x, y, v, width, height) {
+  return mapKeypoints(state, id, (points) =>
+    points.map((point, i) => (i === index ? [clamp(x, 0, width), clamp(y, 0, height), v] : point)),
+  );
+}
+
+/**
+ * Change one point's visibility. Making it "not labelled" is refused (state returned unchanged)
+ * when it is the last labelled point, because the server needs at least one. A point that was not
+ * labelled and becomes labelled needs a place: `fallback` = [x, y].
+ */
+export function setKeypointVisibility(state, id, index, v, fallback = [0, 0]) {
+  const item = state.annotations.find((a) => a.id === id && a.kind === "keypoints");
+  if (!item || !item.data.points[index]) return state;
+  const points = item.data.points;
+  if (v === NOT_LABELLED && points.filter((p, i) => i !== index && p[2] > NOT_LABELLED).length === 0) {
+    return state;
+  }
+  return mapKeypoints(state, id, (all) =>
+    all.map((point, i) => {
+      if (i !== index) return point;
+      if (v === NOT_LABELLED) return [0, 0, 0];
+      return point[2] === NOT_LABELLED ? [fallback[0], fallback[1], v] : [point[0], point[1], v];
+    }),
+  );
 }

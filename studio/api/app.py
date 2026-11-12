@@ -9,6 +9,7 @@ import asyncio
 import logging
 import shutil
 import sqlite3
+import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,9 +20,10 @@ from fastapi import Path as PathParam
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StrictInt
+from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from studio import annotations, db, importer, paths, repo
+from studio import annotations, db, exporter, importer, label_import, paths, repo
 from studio import repo_annotations as annotations_repo
 from studio.config import load_config
 from studio.jobs import JobManager
@@ -415,6 +417,54 @@ def create_app(
         if not found:
             raise HTTPException(404, f"Class {class_id} not found.")
         return Response(status_code=204)
+
+    # ---- export and import of labels ----------------------------------------------------------
+    @app.get("/api/projects/{project_id}/export/preview")
+    def export_preview(
+        project_id: ID, format: str = "coco", task: str = "detect",
+        images: bool = True, conn: sqlite3.Connection = Conn,
+    ) -> dict[str, Any]:
+        need_project(conn, project_id)
+        try:
+            return exporter.export_project(conn, config, project_id, format, task, images, None)
+        except exporter.ExportError as error:
+            raise HTTPException(400, str(error)) from error
+
+    @app.get("/api/projects/{project_id}/export")
+    def export_download(
+        project_id: ID, format: str = "coco", task: str = "detect",
+        images: bool = True, conn: sqlite3.Connection = Conn,
+    ) -> FileResponse:
+        need_project(conn, project_id)
+        scratch = paths.data_dir(config) / "tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        target = scratch / f"export_{uuid.uuid4().hex[:10]}.zip"
+        try:
+            exporter.export_project(conn, config, project_id, format, task, images, target)
+        except exporter.ExportError as error:
+            target.unlink(missing_ok=True)
+            raise HTTPException(400, str(error)) from error
+        except BaseException:
+            target.unlink(missing_ok=True)
+            raise
+        name = f"project-{project_id}-{format}{'-' + task if format == 'yolo' else ''}.zip"
+        return FileResponse(
+            target, media_type="application/zip", filename=name,
+            background=BackgroundTask(lambda: target.unlink(missing_ok=True)),
+        )
+
+    @app.post("/api/projects/{project_id}/label-imports")
+    def import_label_files(
+        project_id: ID, body: ImportRequest, conn: sqlite3.Connection = Conn
+    ) -> dict[str, Any]:
+        need_project(conn, project_id)
+        source = Path(body.path).expanduser()
+        if not source.exists():
+            raise HTTPException(400, f"Source not found: {source}")
+        try:
+            return label_import.import_labels(conn, config, project_id, source)
+        except label_import.LabelImportFailed as error:
+            raise HTTPException(400, str(error)) from error
 
     # ---- annotations ------------------------------------------------------------------------
     @app.get("/api/images/{image_id}/annotations")

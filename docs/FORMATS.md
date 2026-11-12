@@ -47,6 +47,7 @@ Source: <https://labelstud.io/guide/export> (**[V]** unless noted).
 **[V]** supported by CVAT and Label Studio (boxes). **[U]** XML schema details. Not in v1 unless asked.
 
 ## 7. Verification to-do (before Stage 3)
+- Note 2026-11-13: Stage 3.1 code follows the COCO / YOLO layouts described above and is covered by our own golden and round-trip tests; no third-party loader has read our files yet.
 - [ ] Confirm every **[U]** line above against the official spec and update this file with the source and date.
 - [ ] Write one golden sample file per format and task type under `tests/data/formats/` (tiny, synthetic, no real datasets).
 - [ ] Check licences: CVAT, Label Studio (and its frontend library), `supervision`.

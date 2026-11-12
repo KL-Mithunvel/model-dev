@@ -116,6 +116,8 @@ Goal: a fast, forgiving annotator.
 
 **Status 2026-11-13: v0.4 (step 2.6, keypoints) built; no independent review and no tag yet.** Class skeletons (API, validation, locked point count once used), sequential placement with visible/hidden/skip, drag, keyboard-only, inspector list, skeleton editor with presets, copy via "Repeat previous image". Checks: `pytest` (20 new backend tests), 78 Node tests, browser scenario `annotate_keypoints` 29/29 plus all earlier scenarios unchanged (smoke 16, annotate 14, flow 30, gallery 9, robust 23, polygon 34, polygon_review 16, perf 2). Bugs found by the real-browser run were in the scenario's own assumptions (a picked point left over after a drag; the folded-away skeleton fields), not in the app.
 
+**Status 2026-11-13: Stage 3.1 (COCO + YOLO export and label import) built early, without a separate plan approval, during the owner-authorised overnight run; no independent review yet.** 14 pure converter tests, 13 API round-trip tests, scenario `export_import` 9/9. The COCO details were written from the public format description and are covered by our own golden tests, not checked against the official site or a third-party loader (docs/FORMATS.md still lists that to-do).
+
 **Success criteria**: 20 boxes drawn with no menu trips; undo/redo through 100 steps restores the exact state; no data loss when the tab is killed right after an edit; keyboard-only annotation works; pan/zoom stays smooth with 200 annotations (measured, provisional); EXIF-rotated images line up (browser check); all of `docs/UX.md` §9; `pytest`, `node --test`, and `tools/dev_run.py` scenarios (real mouse drawing, undo, reload persistence) pass; independent review before each tag.
 
 ### Stage 3 — Formats and versions (v0.5)

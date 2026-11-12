@@ -37,6 +37,8 @@
 - [x] v0.3 independent review: PASS with 9 SHOULD findings, all fixed (scenario `annotate_polygon_review`, 16 checks).
 - [ ] Owner to approve the `v0.3` tag.
 - [x] Stage 2 v0.4 (keypoints) built 2026-11-13 (class skeletons, placement, editing, skeleton editor); `annotate_keypoints` 29/29.
+- [x] Stage 3.1 first slice built 2026-11-13: COCO + YOLO (detect/segment/pose) export and label import with dialogs; not tagged (v0.5 is the planned tag for all of Stage 3).
+- [ ] Stage 3.2 (CVAT / Label Studio adapters) and 3.3 (dataset versions) not started; verify the `[U]` lines in `docs/FORMATS.md` and test the exports with an independent loader before tagging v0.5.
 - [ ] v0.4: independent review, then owner approval of the `v0.3` and `v0.4` tags (the tag command was blocked during the overnight run; nothing is tagged yet).
 - [ ] dev_run: pace default for visible runs was chosen by me (1.0, `--pace 0` for instant) because the owner did not answer; confirm or change.
 - [ ] v0.1 follow-ups (technical debt in CLAUDE.md): parallel import, move browser checks into a real test runner, `httpx2` for the test client (install was blocked), orphan-file sweeper.

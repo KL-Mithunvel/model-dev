@@ -2,6 +2,7 @@
 import { api, watchJob } from "../api.js";
 import { limits } from "../limits.js";
 import { openClassManager } from "../classes.js";
+import { openExportDialog, openLabelImportDialog } from "../labels.js";
 import { el, formatBytes, formatDate, icon, isTyping, openDialog, plural, toast } from "../ui.js";
 
 const SPLITS = ["train", "val", "test"];
@@ -468,6 +469,9 @@ export async function mount(container, { setToolbar, navigate, projectId }) {
   observer.observe(sentinel);
 
   // ---- import ----------------------------------------------------------------------------
+  function openExport() { openExportDialog({ projectId }); }
+  function openLabelImport() { openLabelImportDialog({ projectId, onDone: () => loadPage(true) }); }
+
   function openImport() {
     const body = el("div", { class: "stack" });
     const pathInput = el("input", { class: "input", id: "import-path", type: "text", autocomplete: "off", placeholder: String.raw`C:\Users\me\Pictures\photos   or   D:\data\photos.zip` });
@@ -662,12 +666,16 @@ export async function mount(container, { setToolbar, navigate, projectId }) {
       el("button", { class: "btn", type: "button", onclick: openAutoSplit }, icon("shuffle"), "Split…"),
       el("button", { class: "btn", type: "button", onclick: openClasses }, "Classes…"),
       el("button", { class: "btn", type: "button", onclick: openImport }, icon("upload"), "Import images"),
+      el("button", { class: "btn", type: "button", onclick: openExport }, "Export…"),
+      el("button", { class: "btn", type: "button", onclick: openLabelImport }, "Import labels…"),
       el("button", { class: "btn btn-primary", type: "button", onclick: startAnnotating }, icon("box"), "Annotate"),
     ],
     commands: [
       { label: "Annotate (next unlabelled image)", hint: "", run: startAnnotating },
       { label: "Manage classes", hint: "", run: openClasses },
       { label: "Import images", hint: "", run: openImport },
+      { label: "Export labels (COCO or YOLO zip)", hint: "", run: openExport },
+      { label: "Import labels (COCO or YOLO)", hint: "", run: openLabelImport },
       { label: "Split images into train / val / test", hint: "", run: openAutoSplit },
       { label: "Select all loaded images", hint: "Ctrl A", run: selectAllLoaded },
       { label: "Clear filters", hint: "", run: clearFilters },

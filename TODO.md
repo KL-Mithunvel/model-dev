@@ -35,11 +35,11 @@
 - [x] Tagged `v0.2` on 96e93e9 (2026-11-07), approved by the owner.
 - [x] Stage 2 v0.3 (polygons) built; 18 polygon unit tests, `annotate_polygon` scenario (34 checks), perf with 200 polygons.
 - [x] v0.3 independent review: PASS with 9 SHOULD findings, all fixed (scenario `annotate_polygon_review`, 16 checks).
-- [ ] Owner to approve the `v0.3` tag.
+- [x] `v0.3` tagged 2026-11-13 on b4797a9 (owner approved).
 - [x] Stage 2 v0.4 (keypoints) built 2026-11-13 (class skeletons, placement, editing, skeleton editor); `annotate_keypoints` 29/29.
 - [x] Stage 3.1 first slice built 2026-11-13: COCO + YOLO (detect/segment/pose) export and label import with dialogs; not tagged (v0.5 is the planned tag for all of Stage 3).
 - [ ] Stage 3.2 (CVAT / Label Studio adapters) and 3.3 (dataset versions) not started; verify the `[U]` lines in `docs/FORMATS.md` and test the exports with an independent loader before tagging v0.5.
-- [ ] v0.4: independent review done (PASS; findings fixed 2026-11-13); owner approval of the `v0.3` and `v0.4` tags (the tag command was blocked during the overnight run; nothing is tagged yet).
+- [x] `v0.4` tagged 2026-11-13 on f4e457b (owner approved; review PASS, findings fixed). Tags are local, not pushed.
 - [ ] dev_run: pace default for visible runs was chosen by me (1.0, `--pace 0` for instant) because the owner did not answer; confirm or change.
 - [ ] v0.1 follow-ups (technical debt in CLAUDE.md): parallel import, move browser checks into a real test runner, `httpx2` for the test client (install was blocked), orphan-file sweeper.
 - [x] G1: wrote `docs/FEATURES.md` and `docs/FORMATS.md` (2026-11-06). Cleared for planning.

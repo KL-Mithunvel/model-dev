@@ -71,11 +71,22 @@ export function deleteAnnotations(state, ids) {
   return withAnnotations(state, state.annotations.filter((a) => !target(a)));
 }
 
-export function setClass(state, ids, classId) {
+/**
+ * A keypoint set can only take a class whose skeleton has the same number of points
+ * (the server refuses the save otherwise). `skeletonLength` is that class's number of points,
+ * or null when it has no skeleton; leave it out to skip the check. Boxes and polygons can take
+ * any class.
+ */
+export function canTakeClass(annotation, skeletonLength) {
+  return annotation.kind !== "keypoints" || skeletonLength === annotation.data.points.length;
+}
+
+export function setClass(state, ids, classId, skeletonLength) {
   const target = isTarget(ids);
+  const changes = (a) => target(a) && (skeletonLength === undefined || canTakeClass(a, skeletonLength));
   return withAnnotations(
     state,
-    state.annotations.map((a) => (target(a) ? { ...a, class_id: classId } : a)),
+    state.annotations.map((a) => (changes(a) ? { ...a, class_id: classId } : a)),
   );
 }
 

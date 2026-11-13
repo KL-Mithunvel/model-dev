@@ -142,38 +142,47 @@ def update_class(
     has keypoint annotations the number of points cannot change (the stored points would no
     longer line up with the names).
     """
-    current = conn.execute("SELECT * FROM classes WHERE id = ?", (class_id,)).fetchone()
-    if current is None:
-        return None
-    skeleton_json = current["skeleton"]
-    if skeleton is not UNSET:
-        old = json.loads(current["skeleton"]) if current["skeleton"] else None
-        used = conn.execute(
-            "SELECT COUNT(*) FROM annotations WHERE class_id = ? AND kind = 'keypoints'",
-            (class_id,),
-        ).fetchone()[0]
-        old_count = len(old["names"]) if old else None
-        new_count = len(skeleton["names"]) if skeleton else None
-        if used and old_count != new_count:
-            raise ValueError(
-                f"{used} keypoint annotation(s) use this skeleton, so its number of points cannot "
-                "change. Rename points or change edges, or delete those annotations first."
-            )
-        skeleton_json = validation.dumps(skeleton) if skeleton else None
+    # Take the write lock FIRST, like save_annotations: the point-count check below and the
+    # UPDATE must not have a keypoint save slip in between them.
+    conn.execute("BEGIN IMMEDIATE")
     try:
-        conn.execute(
-            "UPDATE classes SET name = ?, color = ?, position = ?, skeleton = ? WHERE id = ?",
-            (
-                name if name is not None else current["name"],
-                color.upper() if color is not None else current["color"],
-                position if position is not None else current["position"],
-                skeleton_json,
-                class_id,
-            ),
-        )
-    except sqlite3.IntegrityError as error:
-        raise ClassExists(f"A class named '{name}' already exists.") from error
-    conn.commit()
+        current = conn.execute("SELECT * FROM classes WHERE id = ?", (class_id,)).fetchone()
+        if current is None:
+            conn.rollback()
+            return None
+        skeleton_json = current["skeleton"]
+        if skeleton is not UNSET:
+            old = json.loads(current["skeleton"]) if current["skeleton"] else None
+            used = conn.execute(
+                "SELECT COUNT(*) FROM annotations WHERE class_id = ? AND kind = 'keypoints'",
+                (class_id,),
+            ).fetchone()[0]
+            old_count = len(old["names"]) if old else None
+            new_count = len(skeleton["names"]) if skeleton else None
+            if used and old_count != new_count:
+                raise ValueError(
+                    f"{used} keypoint annotation(s) use this skeleton, so its number of points "
+                    "cannot change. Rename points or change edges, or delete those annotations "
+                    "first."
+                )
+            skeleton_json = validation.dumps(skeleton) if skeleton else None
+        try:
+            conn.execute(
+                "UPDATE classes SET name = ?, color = ?, position = ?, skeleton = ? WHERE id = ?",
+                (
+                    name if name is not None else current["name"],
+                    color.upper() if color is not None else current["color"],
+                    position if position is not None else current["position"],
+                    skeleton_json,
+                    class_id,
+                ),
+            )
+        except sqlite3.IntegrityError as error:
+            raise ClassExists(f"A class named '{name}' already exists.") from error
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
     return get_class(conn, class_id)
 
 

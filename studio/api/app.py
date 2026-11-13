@@ -371,7 +371,7 @@ def create_app(
             max_length = config["projects"]["max_name_length"]
             name = annotations_repo.clean_class_name(body.name, max_length)
             color = annotations_repo.clean_color(body.color) if body.color else None
-            skeleton = clean_skeleton(body.skeleton) if body.skeleton else None
+            skeleton = clean_skeleton(body.skeleton) if body.skeleton is not None else None
             return annotations_repo.create_class(
                 conn, project_id, name, color, config["annotations"]["palette"], skeleton
             )
@@ -392,7 +392,7 @@ def create_app(
             color = annotations_repo.clean_color(body.color) if body.color is not None else None
             skeleton = annotations_repo.UNSET
             if "skeleton" in body.model_fields_set:
-                skeleton = clean_skeleton(body.skeleton) if body.skeleton else None
+                skeleton = clean_skeleton(body.skeleton) if body.skeleton is not None else None
             updated = annotations_repo.update_class(
                 conn, class_id, name, color, body.position, skeleton
             )

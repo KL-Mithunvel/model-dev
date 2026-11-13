@@ -80,17 +80,22 @@ def test_polygon_rules():
 
 
 def test_keypoint_rules():
+    def sk(count):
+        return {"names": [f"p{i}" for i in range(count)], "edges": []}
+
     ok = {"kind": "keypoints", "data": {"points": [[10, 10, 2], [20, 20, 1], [5, 5, 0]]}}
-    cleaned = check(ok)["data"]["points"]
+    cleaned = check(ok, sk(3))["data"]["points"]
     assert cleaned == [[10, 10, 2], [20, 20, 1], [0.0, 0.0, 0]]  # unlabelled position is zeroed
     with pytest.raises(AnnotationError, match="visibility"):
-        check({"kind": "keypoints", "data": {"points": [[1, 1, 3]]}})
+        check({"kind": "keypoints", "data": {"points": [[1, 1, 3]]}}, sk(1))
     with pytest.raises(AnnotationError, match="at least one keypoint must be labelled"):
-        check({"kind": "keypoints", "data": {"points": [[1, 1, 0], [2, 2, 0]]}})
+        check({"kind": "keypoints", "data": {"points": [[1, 1, 0], [2, 2, 0]]}}, sk(2))
     with pytest.raises(AnnotationError, match="at least one point"):
-        check({"kind": "keypoints", "data": {"points": []}})
+        check({"kind": "keypoints", "data": {"points": []}}, sk(1))
     with pytest.raises(AnnotationError, match="outside the image"):
-        check({"kind": "keypoints", "data": {"points": [[999, 1, 2]]}})
+        check({"kind": "keypoints", "data": {"points": [[999, 1, 2]]}}, sk(1))
+    with pytest.raises(AnnotationError, match="no keypoints defined"):
+        check({"kind": "keypoints", "data": {"points": [[1, 1, 2]]}})
 
 
 def test_keypoint_count_must_match_the_class_skeleton():

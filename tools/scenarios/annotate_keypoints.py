@@ -233,3 +233,16 @@ async def run(s):
     s.check("5 dots per drawn point after a reload", await s.js("document.querySelectorAll('svg.overlay .kp-dot').length") > 0)
     stats = s.api.call("GET", f"/api/projects/{project}/annotation-stats")[1]
     s.check("project stats count keypoint sets per class", any(c.get("keypoints", 0) >= 1 for c in stats["per_class"]), str(stats))
+
+    # ---- review fix: a set cannot move to a class with a different number of points ---------------
+    await s.say("Changing a pose to a class with another number of points is refused, not saved wrong")
+    await open_image(s, project, ids[0])
+    await s.click(".ann-row")  # select the pose from the list
+    await s.wait_for("document.querySelectorAll('.kp-list li').length === 5")
+    await s.press("2")  # 'plain' now has 2 points; the pose has 5
+    await s.wait_for(f"{toast_text()}.includes('different number of points')", 5)
+    await s.press("Ctrl+S")
+    still_cat = sets(s, ids[0])
+    s.check("the pose kept its class and the save chip shows no error",
+            still_cat and all(a["class_id"] == cat for a in still_cat)
+            and await s.js("document.querySelector('.save-chip').dataset.status") != "rejected")

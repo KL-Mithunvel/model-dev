@@ -76,3 +76,12 @@
 - Left for later: merging `main` into `machine-vision` will conflict in `CLAUDE-COMMON.md` and `CLAUDE_INDEX.md`.
 - Decision: `compute_survey.py` was run with system Python because this repo has no venv; it is standard library only and read-only.
 - Push of `main` was rejected: `origin/main` already had PR #3 (Documentation Discipline + "ok KLM" opener in `PROJ_STARTER.md`, merged 2026-06-18). Merged it into local `main` (no force-push). Git merged cleanly but left two Documentation Discipline sections in `CLAUDE-COMMON.md`; removed the remote's copy and kept the `docs/` version (owner's decision). The "ok KLM" opener is now active on `main`.
+
+## 2026-11-13 — v0.4 independent review and fixes
+- Fresh-context reviewer (read-only, ran pytest/ruff/node tests/4 scenarios plus its own probes): **PASS**, 0 blockers, 4 SHOULD, 3 NIT. Fixed in this commit:
+  - Changing a selected keypoint set to a class with another point count made every save fail (400): the editor now keeps the old class and says why (`canTakeClass`); scenario check added.
+  - A class without a skeleton accepted keypoints of any length and then could never get a skeleton: refused by the validator.
+  - `update_class` point-count check was check-then-write: now inside `BEGIN IMMEDIATE`; a threaded test hammers PATCH and PUT together.
+  - `skeleton: {}` meant "remove": now an error (`is not None`).
+  - Nits: client duplicate-name check now matches the server's case folding; class label moved above the pose; backend tests added for out-of-image, bad `v`, all-zero, huge numbers, 0,0 storage.
+- Checks after the fixes: pytest 209 passed/1 skipped, ruff clean, node tests 80/80, scenarios annotate_keypoints 30/30, smoke 16/16, annotate_robust 23/23, annotate_polygon 34/34, export_import 9/9. The race fix is proven by a test that passes, not by a reproduced failure of the old code (the reviewer could not reproduce the interleaving either). No second review pass.

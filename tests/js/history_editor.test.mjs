@@ -240,3 +240,18 @@ test("undo through 100 random steps restores the exact state, redo restores the 
     assert.equal(JSON.stringify(history.present), snapshots[i], `redo to step ${i}`);
   }
 });
+
+test("a keypoint set only takes a class with the same number of points", async () => {
+  const { canTakeClass, setClass } = await import("../../studio/web/js/editor.js");
+  const set = { id: "k", class_id: 1, kind: "keypoints", data: { points: [[1, 1, 2], [2, 2, 2], [3, 3, 2]] } };
+  const box = { id: "b", class_id: 1, kind: "box", data: { x: 1, y: 1, w: 5, h: 5 } };
+  const state = { annotations: [set, box], marked_empty: false, label_class_id: null };
+  assert.equal(canTakeClass(set, 3), true);
+  assert.equal(canTakeClass(set, 5), false);
+  assert.equal(canTakeClass(set, null), false);
+  assert.equal(canTakeClass(box, null), true);
+  const changed = setClass(state, ["k", "b"], 2, 5);
+  assert.equal(changed.annotations[0].class_id, 1); // kept
+  assert.equal(changed.annotations[1].class_id, 2); // box moved
+  assert.equal(setClass(state, ["k"], 2, 3).annotations[0].class_id, 2);
+});

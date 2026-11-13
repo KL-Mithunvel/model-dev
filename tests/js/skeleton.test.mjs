@@ -41,3 +41,8 @@ test("presets are valid: unique names, edges inside range", () => {
     assert.deepEqual(parseSkeleton(text.points, text.connections).skeleton.names, preset.names);
   }
 });
+
+test("names that differ only by case folding are duplicates, like on the server", () => {
+  assert.match(parseSkeleton("é\nÉ", "").error, /listed twice/);
+  assert.match(parseSkeleton("ß\nSS", "").error, /listed twice/);
+});

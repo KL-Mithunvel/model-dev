@@ -109,3 +109,88 @@ def test_limits_expose_skeleton_bounds(client):
     got = client.get("/api/limits").json()
     assert got["max_keypoints"] == 64
     assert got["skeleton_name_max"] == 40
+
+
+def test_keypoints_need_a_class_with_a_skeleton(client, project):
+    pid = project["id"]
+    plain = make_class(client, pid, "plain").json()["id"]
+    (image,) = seed_images(client, pid, 1)
+    item = {"class_id": plain, "kind": "keypoints", "data": {"points": [[10, 10, 2]]}}
+    response = save(client, image, 0, [item])
+    assert response.status_code == 400
+    assert "no keypoints defined" in response.json()["detail"]
+    # so a skeleton can still be added later
+    assert client.patch(f"/api/classes/{plain}", json={"skeleton": SKELETON}).status_code == 200
+
+
+def test_an_empty_skeleton_object_is_an_error_not_a_removal(client, project):
+    pid = project["id"]
+    assert client.post(
+        f"/api/projects/{pid}/classes", json={"name": "a", "skeleton": {}}
+    ).status_code == 400
+    cid = client.post(
+        f"/api/projects/{pid}/classes", json={"name": "b", "skeleton": SKELETON}
+    ).json()["id"]
+    assert client.patch(f"/api/classes/{cid}", json={"skeleton": {}}).status_code == 400
+    assert client.get(f"/api/projects/{pid}/classes").json()[0]["skeleton"] == SKELETON
+
+
+@pytest.mark.parametrize(
+    "points",
+    [
+        [[99999, 10, 2], [20, 20, 2], [30, 30, 2]],  # outside the image
+        [[10, 10, 3], [20, 20, 2], [30, 30, 2]],  # v out of range
+        [[10, 10, 1.5], [20, 20, 2], [30, 30, 2]],
+        [[10, 10, "2"], [20, 20, 2], [30, 30, 2]],
+        [[0, 0, 0], [0, 0, 0], [0, 0, 0]],  # nothing labelled
+        [[10**30, 10, 2], [20, 20, 2], [30, 30, 2]],  # huge
+    ],
+)
+def test_bad_keypoints_are_refused(client, project, points):
+    pid = project["id"]
+    cid = client.post(
+        f"/api/projects/{pid}/classes", json={"name": "cat", "skeleton": SKELETON}
+    ).json()["id"]
+    (image,) = seed_images(client, pid, 1)
+    item = {"class_id": cid, "kind": "keypoints", "data": {"points": points}}
+    assert save(client, image, 0, [item]).status_code in (400, 422)
+
+
+def test_not_labelled_points_are_stored_as_zero(client, project):
+    pid = project["id"]
+    cid = client.post(
+        f"/api/projects/{pid}/classes", json={"name": "cat", "skeleton": SKELETON}
+    ).json()["id"]
+    (image,) = seed_images(client, pid, 1)
+    item = {"class_id": cid, "kind": "keypoints",
+            "data": {"points": [[10, 10, 2], [99999, -5, 0], [30, 30, 1]]}}
+    assert save(client, image, 0, [item]).status_code == 200
+    stored = client.get(f"/api/images/{image}/annotations").json()["annotations"][0]
+    assert stored["data"]["points"][1] == [0, 0, 0]
+
+
+def test_skeleton_change_and_keypoint_saves_do_not_interleave(client, project):
+    """Hammer save and skeleton PATCH together: stored sets must always match the skeleton."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    pid = project["id"]
+    cid = client.post(
+        f"/api/projects/{pid}/classes", json={"name": "cat", "skeleton": SKELETON}
+    ).json()["id"]
+    (image,) = seed_images(client, pid, 1)
+    item = {"class_id": cid, "kind": "keypoints",
+            "data": {"points": [[10, 10, 2], [20, 20, 2], [30, 30, 2]]}}
+    longer = {"names": ["a", "b", "c", "d"], "edges": []}
+
+    def patch(_):
+        return client.patch(f"/api/classes/{cid}", json={"skeleton": longer}).status_code
+
+    def put(_):
+        return save(client, image, 0, [item]).status_code
+
+    with ThreadPoolExecutor(8) as pool:
+        list(pool.map(lambda i: patch(i) if i % 2 else put(i), range(16)))
+    skeleton = client.get(f"/api/projects/{pid}/classes").json()[0]["skeleton"]
+    stored = client.get(f"/api/images/{image}/annotations").json()["annotations"]
+    for annotation in stored:
+        assert len(annotation["data"]["points"]) == len(skeleton["names"])

@@ -6,7 +6,7 @@ import { openClassDialog } from "../classes.js";
 import {
   addBox, appendFromServer, canMarkEmpty, cycle, deleteAnnotations, dropUnknownClasses,
   duplicateAnnotations, fromServer, makeIdFactory, moveAnnotations, resizeAnnotationsBy,
-  resizeAnnotationTo, setClass, setLabel, setMarkedEmpty, toPayload,
+  resizeAnnotationTo, setClass, canTakeClass, setLabel, setMarkedEmpty, toPayload,
   addPolygon, insertVertex, moveVertex, removeVertex, simplifyAnnotation,
   addKeypoints, placeKeypoint, setKeypointVisibility,
 } from "../editor.js";
@@ -233,7 +233,10 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
         drawPose(nodes.rect, a, bounds, scale);
       }
       nodes.label.setAttribute("x", (bounds ? bounds.minX - POSE_PAD_PX / scale : 0) + 3 / scale);
-      nodes.label.setAttribute("y", (bounds ? bounds.minY - POSE_PAD_PX / scale : 0) + 14 / scale);
+      // Above the pose's box so the text does not cover the first point; inside it only when
+      // the pose touches the top of the image.
+      const top = bounds ? bounds.minY - POSE_PAD_PX / scale : 0;
+      nodes.label.setAttribute("y", top >= 18 / scale ? top - 4 / scale : top + 14 / scale);
     } else {
       nodes.rect.setAttribute("points", pointsAttr(a.data.points));
       const bounds = polygonBounds(a.data.points);
@@ -617,8 +620,18 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   }
   function chooseClass(classId) {
     ui.activeClass = classId;
-    if (ui.selection.size) commit(setClass(history.present, [...ui.selection], classId));
-    else renderInspector();
+    if (ui.selection.size) {
+      const length = classById(classId)?.skeleton?.names?.length ?? null;
+      const ids = [...ui.selection];
+      const blocked = history.present.annotations.filter((a) => ids.includes(a.id) && !canTakeClass(a, length));
+      if (blocked.length) {
+        toast(
+          `${plural(blocked.length, "keypoint set")} keep${blocked.length === 1 ? "s" : ""} the old class: “${classById(classId)?.name}” has a different number of points.`,
+          { error: true },
+        );
+      }
+      if (blocked.length < ids.length) commit(setClass(history.present, ids, classId, length));
+    } else renderInspector();
     announce(`Class ${classById(classId)?.name}`);
   }
   function toggleLabel(classId) {

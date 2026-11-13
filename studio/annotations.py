@@ -120,7 +120,11 @@ def _validate_keypoints(
     points = _points(data, 3, width, height, limits, where)
     if not points:
         raise AnnotationError(f"{where}: at least one point is required.")
-    if skeleton is not None and len(points) != len(skeleton["names"]):
+    if skeleton is None:
+        raise AnnotationError(
+            f"{where}: this class has no keypoints defined. Edit the class and list its points."
+        )
+    if len(points) != len(skeleton["names"]):
         expected = len(skeleton["names"])
         raise AnnotationError(
             f"{where}: this class has {expected} keypoints but {len(points)} were sent."

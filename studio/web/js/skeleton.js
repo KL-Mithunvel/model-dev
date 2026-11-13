@@ -5,7 +5,7 @@
 export const EDGE_SEPARATOR = " - ";
 
 const clean = (text) => text.split(/\s+/).filter(Boolean).join(" ");
-const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+const same = (a, b) => a.toLowerCase() === b.toLowerCase() || a.toUpperCase() === b.toUpperCase();
 
 /** The two text boxes for a skeleton (or empty ones). */
 export function skeletonToText(skeleton) {

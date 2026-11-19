@@ -27,6 +27,10 @@
   --split-train: #0062cc;
   --split-val: #8a5a00;
   --split-test: #7a3fb0;
+  --chart-1: #0062cc;
+  --chart-2: #a33a00;
+  --warn: #8a5a00;
+  --warn-soft: rgba(138, 90, 0, 0.12);
 
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --fs-12: 0.75rem;
@@ -77,6 +81,10 @@
     --split-train: #4da3ff;
     --split-val: #e0b04a;
     --split-test: #c79bf0;
+    --chart-1: #4da3ff;
+    --chart-2: #ff9f6b;
+    --warn: #e0b04a;
+    --warn-soft: rgba(224, 176, 74, 0.16);
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
     --shadow-2: 0 12px 40px rgba(0, 0, 0, 0.6);
   }
@@ -105,6 +113,10 @@
   --split-train: #4da3ff;
   --split-val: #e0b04a;
   --split-test: #c79bf0;
+  --chart-1: #4da3ff;
+  --chart-2: #ff9f6b;
+  --warn: #e0b04a;
+  --warn-soft: rgba(224, 176, 74, 0.16);
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
   --shadow-2: 0 12px 40px rgba(0, 0, 0, 0.6);
 }

@@ -17,6 +17,9 @@ from studio.config import load_config
 def config(tmp_path):
     cfg = copy.deepcopy(load_config())
     cfg["app"]["data_dir"] = str(tmp_path / "data")
+    # Tests never read real hardware or run a sampling thread unless they ask for it.
+    cfg["hardware"]["sampler"] = "fake"
+    cfg["hardware"]["autostart"] = False
     return cfg
 
 

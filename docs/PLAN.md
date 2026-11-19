@@ -142,6 +142,8 @@ Goal: see what the machine is doing, live and historically.
 - **5.3 Dashboard** — Live charts on a shared time axis, units shown, specific warnings with one-click fixes.
   Success: sampling overhead under 2 % CPU; fake-sampler tests; dashboard works with no GPU present.
 
+  **Built 2026-11-19 (overnight run, no separate plan approval; no independent review yet).** Samplers (psutil, NVML, fakes), ring buffer + recorded runs (migration 004), API incl. WebSocket, dashboard `#/hardware`. Measured on this laptop (22 threads, RTX 1000 Ada): one tick 1.3 ms = 0.13 % of one core at 1 s (budget 2 %). Checks: 38 backend tests (mutation-checked: broken averaging and broken pruning each fail a test), 10 Node chart tests, browser scenario `monitor` 18/18 (6 consecutive runs). Deviation: Intel Arc/NPU is only a stub reporting "unsupported" (the plan said best-effort; no Windows counter reader was written). No GPU-less machine was available: that path is covered by `fake_no_gpu` only.
+
 ### Stage 6 — Training (v0.8–v0.9)
 Goal: train from a dataset version and supervise it.
 - **6.1 Trainer interface (v0.8)** — `fit`, `evaluate`, `export`, `resume`; config via YAML; deterministic seeds; checkpoints.

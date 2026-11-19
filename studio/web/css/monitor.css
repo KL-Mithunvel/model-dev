@@ -1,0 +1,36 @@
+/* Hardware monitor (Stage 5). Colours come from tokens.css only. */
+.monitor .stack { gap: var(--sp-4); }
+.chart-grid-wrap { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-4); }
+.chart-card { gap: var(--sp-2); }
+.chart-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+.chart-head h3, .card > h3 { font-size: var(--fs-15); font-weight: 600; }
+.chart-value { font-size: var(--fs-17); font-variant-numeric: tabular-nums; }
+.chart-plot { position: relative; }
+.chart { display: block; width: 100%; height: 120px; background: var(--surface-2); border-radius: var(--radius-control); }
+.chart-grid { stroke: var(--border); stroke-width: 1; }
+.chart-line { fill: none; stroke: var(--chart-1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-line.dashed { stroke: var(--chart-2); stroke-dasharray: 6 4; }
+.chart-top { position: absolute; top: 2px; right: var(--sp-2); font-size: var(--fs-12); color: var(--text-2); }
+.chart-foot { display: flex; justify-content: space-between; font-size: var(--fs-12); color: var(--text-2); }
+.chart-legend { display: flex; gap: var(--sp-4); font-size: var(--fs-12); color: var(--text-2); }
+.chart-legend span { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.swatch { display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--chart-1); }
+.swatch.dashed { border-top: 2px dashed var(--chart-2); }
+
+.cores { display: grid; grid-template-columns: repeat(auto-fill, minmax(28px, 1fr)); gap: var(--sp-1); }
+.core { display: flex; flex-direction: column; align-items: stretch; gap: 2px; height: 72px; font-size: var(--fs-12); color: var(--text-2); text-align: center; }
+.core .bar { position: relative; flex: 1; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.core i { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: var(--chart-1); }
+
+.notice { padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-card); background: var(--accent-soft); }
+.notice.warning { background: var(--warn-soft); border-left: 4px solid var(--warn); }
+.notice p { margin-top: var(--sp-1); }
+
+.table { width: 100%; border-collapse: collapse; font-size: var(--fs-13); }
+.table th { text-align: left; color: var(--text-2); font-weight: 500; }
+.table th, .table td { padding: var(--sp-2) var(--sp-2); border-bottom: 1px solid var(--border); }
+.table td.actions { text-align: right; white-space: nowrap; display: table-cell; }
+.table td.actions .btn + .btn { margin-left: var(--sp-2); }
+dialog.wide { width: min(900px, calc(100vw - 2 * var(--sp-4))); }
+dialog.wide .dlg-body { max-height: 70vh; overflow: auto; }
+.page-head .seg button { flex: none; padding: 0 var(--sp-3); white-space: nowrap; }

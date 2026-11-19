@@ -66,7 +66,24 @@ splits:
 
 hardware:
   device: auto             # auto | cuda | cpu — resolved at runtime, never assumed
-  monitor_interval_s: 1.0  # provisional sampling period
+  monitor_interval_s: 1.0  # sampling period; provisional (overhead measured in Stage 5, see docs/PLAN.md)
+  sampler: auto            # auto = real psutil + NVML samplers | fake = deterministic readings with a fake GPU | fake_no_gpu = fake without a GPU
+  autostart: true          # sample whenever the server runs, so the dashboard opens with history
+  ring_buffer_seconds: 900 # recent history kept in memory for the live charts
+  chart_windows_s: [60, 300, 900]   # time windows offered by the dashboard (those longer than the buffer are dropped)
+  history_interval_s: 5    # a recorded run stores one averaged row per this many seconds
+  max_run_samples: 20000   # stored rows per run; a run that gets longer stops storing and is marked truncated
+  max_runs: 200            # recorded runs kept; the oldest finished run is removed to make room
+  max_run_name_length: 80
+  warnings:                # the dashboard warns above these values
+    vram_fraction: 0.90
+    gpu_temp_c: 83
+    ram_fraction: 0.90
+  fake:                    # only used when sampler is fake / fake_no_gpu
+    vram_fraction: 0.50    # constant, so a scenario can pick a warning state
+    gpu_temp_c: 60
+    vram_total_gb: 6.0
+    cores: 8
 
 training:
   seed: 42

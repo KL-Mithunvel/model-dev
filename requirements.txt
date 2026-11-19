@@ -25,3 +25,9 @@ PyYAML==6.0.3
 pytest==9.2.0
 pycocotools==2.0.11  # independent COCO loader for tests (tests only; licence to confirm: believed BSD-style, from the COCO API)
 ruff==0.17.4
+
+# Hardware monitor (Stage 5). Checked 2026-11-19.
+# psutil: BSD-3-Clause; CPU per core, RAM, disk I/O. nvidia-ml-py: BSD (NVIDIA); NVML bindings for GPU load, VRAM, temperature, power, clocks.
+# Both are optional at run time: the samplers report "unavailable" if a library or GPU is missing.
+psutil==7.2.2
+nvidia-ml-py==13.615.71

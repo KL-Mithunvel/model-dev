@@ -26,6 +26,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from studio import annotations, db, exporter, importer, label_import, paths, repo, versions
 from studio import repo_annotations as annotations_repo
 from studio.config import load_config
+from studio.hardware.monitor import Monitor, RunActive
 from studio.jobs import JobManager
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,10 @@ class VersionCreate(BaseModel):
     preprocessing: dict[str, Any] | None = None
 
 
+class RunStart(BaseModel):
+    name: str
+
+
 class AutoSplitRequest(BaseModel):
     ratios: dict[str, float] | None = None
     seed: int | None = None
@@ -98,16 +103,21 @@ def create_app(
     with db.connect(database_file) as setup_conn:
         db.migrate(setup_conn)
     jobs = JobManager(keep_finished=config["jobs"]["keep_finished"])
+    monitor = Monitor(config["hardware"], database_file)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        if config["hardware"]["autostart"]:
+            monitor.start()
         yield
+        monitor.stop()
         jobs.shutdown()
 
     app = FastAPI(title="Local Vision Studio", version="0.1.0", lifespan=lifespan)
     app.state.config = config
     app.state.db_path = database_file
     app.state.jobs = jobs
+    app.state.monitor = monitor
     app.add_middleware(
         TrustedHostMiddleware, allowed_hosts=allowed_hosts or config["app"]["allowed_hosts"]
     )
@@ -260,6 +270,88 @@ def create_app(
                 await asyncio.sleep(poll)
         except WebSocketDisconnect:
             return  # the browser went away (tab closed or hidden); nothing to clean up
+
+    # ---- hardware monitor (Stage 5) -----------------------------------------------------------
+    # Live data: the page loads /status and /samples once, then follows /ws (new samples only) and
+    # falls back to polling /samples?after=<seq> if the socket cannot connect.
+    @app.get("/api/monitor/status")
+    def monitor_status() -> dict[str, Any]:
+        return monitor.status()
+
+    @app.get("/api/monitor/samples")
+    def monitor_samples(
+        after: int = Query(0, ge=0), seconds: float | None = Query(None, gt=0)
+    ) -> dict[str, Any]:
+        return {
+            "samples": monitor.samples(after_seq=after, seconds=seconds),
+            "catalog": monitor.catalog(),
+            "warnings": monitor.warnings(),
+            "active_run": monitor.status()["active_run"],
+            "run_epoch": monitor.run_epoch,
+        }
+
+    @app.websocket("/api/monitor/ws")
+    async def monitor_live(websocket: WebSocket, after: int = 0) -> None:
+        await websocket.accept()
+        last_seq, last_catalog = after, None
+        try:
+            while True:
+                fresh = monitor.samples(after_seq=last_seq)
+                if fresh:
+                    last_seq = fresh[-1]["seq"]
+                    catalog = monitor.catalog()
+                    message: dict[str, Any] = {
+                        "samples": fresh,
+                        "warnings": monitor.warnings(),
+                        "active_run": monitor.status()["active_run"],
+                        "run_epoch": monitor.run_epoch,
+                    }
+                    if catalog != last_catalog:
+                        message["catalog"], last_catalog = catalog, catalog
+                    await websocket.send_json(message)
+                await asyncio.sleep(monitor.interval / 2)
+        except WebSocketDisconnect:
+            return
+
+    @app.post("/api/monitor/runs", status_code=201)
+    def start_monitor_run(body: RunStart) -> dict[str, Any]:
+        monitor.start()  # recording needs samples, even if autostart is off
+        try:
+            run = monitor.start_run(body.name)
+            return {**run, "run_epoch": monitor.run_epoch}
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        except RunActive as error:
+            raise HTTPException(409, str(error)) from error
+
+    @app.post("/api/monitor/runs/{run_id}/stop")
+    def stop_monitor_run(run_id: ID) -> dict[str, Any]:
+        try:
+            run = monitor.stop_run(run_id)
+            return {**run, "run_epoch": monitor.run_epoch}
+        except LookupError as error:
+            raise HTTPException(409, str(error)) from error
+
+    @app.get("/api/monitor/runs")
+    def list_monitor_runs() -> list[dict[str, Any]]:
+        return monitor.list_runs()
+
+    @app.get("/api/monitor/runs/{run_id}")
+    def get_monitor_run(run_id: ID) -> dict[str, Any]:
+        try:
+            return monitor.get_run(run_id)
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from error
+
+    @app.delete("/api/monitor/runs/{run_id}", status_code=204)
+    def delete_monitor_run(run_id: ID) -> Response:
+        try:
+            monitor.delete_run(run_id)
+        except RunActive as error:
+            raise HTTPException(409, str(error)) from error
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from error
+        return Response(status_code=204)
 
     @app.get("/api/projects/{project_id}/batches")
     def list_batches(project_id: ID, conn: sqlite3.Connection = Conn) -> list[dict[str, Any]]:

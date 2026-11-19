@@ -53,6 +53,7 @@ function buildSidebar() {
   sidebar.replaceChildren(
     el("div", { class: "brand", text: "Vision Studio" }),
     item("Projects", "folder", { href: "#/projects", id: "nav-projects" }),
+    item("Hardware", "chip", { href: "#/hardware", id: "nav-hardware" }),
     el("div", { class: "nav-spacer" }),
     item("Appearance", "sun", { onclick: themeDialog }),
     item("Shortcuts", "keyboard", { onclick: showShortcuts }),
@@ -63,6 +64,7 @@ function buildSidebar() {
 function globalCommands() {
   return [
     { label: "Go to Projects", hint: "", run: () => navigate("/projects") },
+    { label: "Go to Hardware monitor", hint: "", run: () => navigate("/hardware") },
     ...paletteExtras,
     { label: "Appearance: System / Light / Dark", hint: "", run: themeDialog },
     { label: "Show keyboard shortcuts", hint: "?", run: showShortcuts },
@@ -71,6 +73,7 @@ function globalCommands() {
 
 const routes = [
   { pattern: /^\/projects$/, load: () => import("./views/projects.js"), params: () => ({}) },
+  { pattern: /^\/hardware$/, load: () => import("./views/monitor.js"), params: () => ({}) },
   { pattern: /^\/projects\/(\d+)$/, load: () => import("./views/gallery.js"), params: (m) => ({ projectId: Number(m[1]) }) },
   { pattern: /^\/projects\/(\d+)\/annotate\/(\d+)$/, load: () => import("./views/annotate.js"), params: (m) => ({ projectId: Number(m[1]), imageId: Number(m[2]) }) },
 ];
@@ -120,7 +123,9 @@ async function route() {
     );
   }
   for (const link of sidebar.querySelectorAll("a.nav-item")) {
-    if (path.startsWith("/projects")) link.setAttribute("aria-current", "page");
+    const section = link.getAttribute("href").replace(/^#/, "");
+    if (path.startsWith(section)) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
   }
   // Move focus to the new view after in-app navigation, but not on the first load: the first Tab
   // on a fresh page must reach the "Skip to content" link.

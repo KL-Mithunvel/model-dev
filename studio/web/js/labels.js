@@ -1,4 +1,4 @@
-// Dialogs to export a project's labels (COCO or YOLO zip) and to import labels back.
+// Dialogs to export a project's labels (COCO, YOLO, CVAT or Label Studio zip) and to import labels back.
 import { api } from "./api.js";
 import { el, openDialog, plural, toast } from "./ui.js";
 
@@ -7,7 +7,10 @@ const CHOICES = [
   { id: "yolo-detect", format: "yolo", task: "detect", label: "YOLO detection (boxes)", hint: "One text file per image. Polygons and keypoints are left out." },
   { id: "yolo-segment", format: "yolo", task: "segment", label: "YOLO segmentation (polygons)", hint: "Boxes are written as 4-corner polygons." },
   { id: "yolo-pose", format: "yolo", task: "pose", label: "YOLO pose (keypoints)", hint: "Every keypoint class needs the same number of points." },
+  { id: "cvat", format: "cvat", task: "detect", label: "CVAT for images 1.1 (boxes and polygons)", hint: "One annotations.xml. Keypoints and splits are not carried." },
+  { id: "labelstudio", format: "labelstudio", task: "detect", label: "Label Studio JSON (boxes, polygons, keypoints)", hint: "Tasks plus a matching labeling config. Hidden keypoints come back as visible." },
 ];
+const FORMAT_NAMES = { coco: "COCO", yolo: "YOLO", cvat: "CVAT", labelstudio: "Label Studio" };
 
 const query = (choice, images) => `format=${choice.format}&task=${choice.task}&images=${images}`;
 
@@ -27,6 +30,7 @@ export function openExportDialog({ projectId }) {
       if (r.excluded_unlabelled) notes.push(`${plural(r.excluded_unlabelled, "unlabelled image")} left out`);
       if (r.excluded_unassigned) notes.push(`${plural(r.excluded_unassigned, "image")} without a split left out`);
       if (r.skipped_annotations) notes.push(`${plural(r.skipped_annotations, "annotation")} this format cannot hold left out`);
+      for (const note of r.notes || []) notes.push(note);
       const splits = Object.entries(r.splits).map(([name, n]) => `${name} ${n}`).join(", ");
       summary.textContent = `${plural(r.images, "image")} (${splits || "none"}), ${plural(r.annotations, "annotation")}.${notes.length ? ` ${notes.join("; ")}.` : ""}`;
     } catch (error) {
@@ -89,7 +93,7 @@ export function openLabelImportDialog({ projectId, onDone }) {
     result.replaceChildren();
     try {
       const r = await api(`/api/projects/${projectId}/label-imports`, { method: "POST", body: { path: input.value.trim() } });
-      const lines = [`${r.format.toUpperCase()}: ${plural(r.annotations_imported, "annotation")} on ${plural(r.matched_images, "image")}.`];
+      const lines = [`${FORMAT_NAMES[r.format] || r.format}: ${plural(r.annotations_imported, "annotation")} on ${plural(r.matched_images, "image")}.`];
       if (r.classes_created.length) lines.push(`New classes: ${r.classes_created.join(", ")}.`);
       if (r.unmatched_images.length) lines.push(`${plural(r.unmatched_images.length, "image")} in the file are not in this project (for example ${r.unmatched_images.slice(0, 3).join(", ")}).`);
       if (r.skipped.length) lines.push(`${plural(r.skipped.length, "item")} skipped (for example: ${r.skipped.slice(0, 2).join("; ")}).`);
@@ -108,7 +112,7 @@ export function openLabelImportDialog({ projectId, onDone }) {
   handle = openDialog({
     title: "Import labels",
     body: [
-      el("div", { class: "field" }, el("label", { for: "labels-path", text: "Folder or .zip with COCO or YOLO labels" }), input,
+      el("div", { class: "field" }, el("label", { for: "labels-path", text: "Folder or .zip with COCO, YOLO, CVAT or Label Studio labels" }), input,
         el("span", { class: "hint", text: "Images are matched by file name and must already be in this project. Their annotations are replaced by the imported ones. Missing classes are created." })),
       problem,
       result,

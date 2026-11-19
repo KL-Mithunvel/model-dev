@@ -1,4 +1,4 @@
-"""Export a project's labels (and optionally its images) as a COCO or YOLO zip.
+"""Export a project's labels (and optionally its images) as a COCO, YOLO, CVAT or Label Studio zip.
 
 Which images are included: labelled ones only (they have annotations, or were marked "no objects").
 If any included image has a split, images without a split are left out and reported; if none has,
@@ -14,9 +14,9 @@ from typing import Any
 
 from studio import paths
 from studio import repo_annotations as ra
-from studio.formats import coco, yolo
+from studio.formats import coco, cvat, labelstudio, yolo
 
-FORMATS = ("coco", "yolo")
+FORMATS = ("coco", "yolo", "cvat", "labelstudio")
 
 
 class ExportError(Exception):
@@ -106,6 +106,7 @@ def export_project(
         "excluded_unassigned": len(labelled) - len(included),
         "splits": {},
         "includes_images": include_images,
+        "notes": [],
     }
     for image in included:
         report["splits"][image["export_split"]] = report["splits"].get(image["export_split"], 0) + 1
@@ -116,6 +117,14 @@ def export_project(
             )
             report["skipped_annotations"] += skipped
         report["annotations"] -= report["skipped_annotations"]
+    if fmt == "cvat":
+        report["skipped_annotations"] = sum(
+            a["kind"] not in cvat.SUPPORTED for i in included for a in i["annotations"]
+        )
+        report["annotations"] -= report["skipped_annotations"]
+        report["notes"].append("CVAT export holds boxes and polygons; splits are not carried")
+    if fmt == "labelstudio":
+        report["notes"] += labelstudio.build(included, classes)[1]
     if dest is None:
         return report
     if not included:
@@ -140,6 +149,16 @@ def export_project(
                 add_text(f"annotations/instances_{split}.json", json.dumps(document, indent=1))
                 for image in members:
                     add_image(image, f"images/{split}")
+        elif fmt == "cvat":
+            add_text("annotations.xml", cvat.build(included, classes, "export")[0])
+            for image in included:
+                add_image(image, "images")
+        elif fmt == "labelstudio":
+            tasks, _ = labelstudio.build(included, classes)
+            add_text("labelstudio.json", json.dumps(tasks, indent=1))
+            add_text("labeling_config.xml", labelstudio.labeling_config(classes))
+            for image in included:
+                add_image(image, "images")
         else:
             for image in included:
                 lines, _ = yolo.export_lines(

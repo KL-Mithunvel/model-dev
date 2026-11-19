@@ -50,6 +50,17 @@ async def run(s):
     summary = await s.js(text_of("dialog .hint[role=status]"))
     s.check("YOLO detect: 1 annotation kept and 2 left out", "1 annotation" in summary and "2 annotations this format cannot hold" in summary, summary)
 
+    await s.say("CVAT carries boxes and polygons; Label Studio carries all three")
+    await s.click("#export-cvat")
+    await s.wait_for("document.querySelector('dialog .hint[role=status]').innerText.includes('CVAT export')")
+    summary = await s.js(text_of("dialog .hint[role=status]"))
+    s.check("CVAT: the keypoint set is reported as left out and the note names the limits",
+            "1 annotation this format cannot hold" in summary and "splits are not carried" in summary, summary)
+    await s.click("#export-labelstudio")
+    await s.wait_for("document.querySelector('dialog .hint[role=status]').innerText.includes('3 annotations')")
+    summary = await s.js(text_of("dialog .hint[role=status]"))
+    s.check("Label Studio: all 3 annotations are counted, none left out", "cannot hold" not in summary, summary)
+
     await s.say("YOLO pose with a second keypoint class of another size is refused in words")
     s.api.call("POST", f"/api/projects/{project}/classes", {"name": "dog", "skeleton": {"names": ["a", "b"], "edges": []}})
     s.expect_console("400")

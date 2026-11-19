@@ -77,8 +77,15 @@ async def run(s):
             "2 suggestions hidden" in await s.js("document.querySelector('[data-assist]').innerText"))
     await s.shot("assist_text")
 
-    await s.say("Lower the filter to 0%: all 6 show; reject one")
-    await s.js("(() => { const r = document.querySelector('#assist-score'); r.value = 0; r.dispatchEvent(new Event('input', {bubbles: true})); })()")
+    await s.say("Drag the score slider with the real mouse: it must follow the whole drag")
+    await s.js("window.__slider = document.querySelector('#assist-score')")
+    rect = await s.js("(() => { const r = document.querySelector('#assist-score').getBoundingClientRect(); return [r.left, r.top + r.height / 2, r.width]; })()")
+    await s.drag((rect[0] + rect[2] * 0.5, rect[1]), (rect[0] + 2, rect[1]), duration=0.6)
+    s.check("the slider is still the same element after the drag (not rebuilt)",
+            await s.js("document.querySelector('#assist-score') === window.__slider"))
+    s.check("one drag moved it all the way down", await s.js("Number(document.querySelector('#assist-score').value)") <= 5,
+            str(await s.js("document.querySelector('#assist-score').value")))
+    await s.wait_for("document.querySelectorAll('[data-suggestion]').length === 6")
     await s.wait_for("document.querySelectorAll('[data-suggestion]').length === 6")
     await s.click("[data-suggestion] button[data-fk^='sug-reject']")
     await s.wait_for("document.querySelectorAll('[data-suggestion]').length === 5")

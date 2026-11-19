@@ -393,3 +393,52 @@ def test_suggest_in_a_project_without_the_file_is_a_clear_error(client, project)
         f"/api/images/{image}/suggest", json={"backend": "fake", "task": "detect_text", "text": "x"}
     )
     assert reply.status_code == 409 and "missing" in reply.json()["detail"]
+
+
+# ---- review fixes --------------------------------------------------------------------------------
+@pytest.mark.parametrize("box, message", [
+    ((10, 10, 0, 5), "above zero"),
+    ((10, 10, -5, 5), "above zero"),
+    ((-1, 10, 5, 5), "outside the image"),
+    ((190, 10, 20, 5), "outside the image"),
+    ((float("nan"), 1, 5, 5), "finite"),
+])
+def test_prompt_boxes_are_checked(cfg, tmp_path, box, message):
+    with pytest.raises(ValueError, match=message):
+        MLService(cfg).check_request(request(TASK_SEGMENT_POINT, tmp_path, box=box))
+
+
+def test_a_good_box_alone_is_a_valid_prompt(cfg, tmp_path):
+    MLService(cfg).check_request(request(TASK_SEGMENT_POINT, tmp_path, box=(10, 10, 50, 40)))
+
+
+def test_huge_prompts_are_refused_before_they_are_processed(client, image_id):
+    url = f"/api/images/{image_id}/suggest"
+    assert client.post(url, json={"backend": "fake", "task": "detect_text", "text": "x" * 5001}).status_code == 422
+    many = [[1, 1, 1]] * 201
+    assert client.post(url, json={"backend": "fake", "task": "segment_point", "points": many}).status_code == 422
+
+
+def test_only_one_sam_download_runs_at_a_time(cfg, tmp_path, monkeypatch):
+    import threading
+
+    cfg["app"]["data_dir"] = str(tmp_path)
+    backend = sam_module.SamBackend(cfg)
+    monkeypatch.setattr(sam_module, "sam_model_registry", {"vit_b": object()})
+    monkeypatch.setattr(sam_module, "torch", object())
+    started, release = threading.Event(), threading.Event()
+
+    def slow(progress, cancelled):
+        started.set()
+        release.wait(5)
+
+    monkeypatch.setattr(backend, "_download", slow)
+    first = threading.Thread(target=backend.download_weights)
+    first.start()
+    assert started.wait(5)
+    assert not backend.can_download()
+    with pytest.raises(BackendError, match="already being downloaded"):
+        backend.download_weights()
+    release.set()
+    first.join()
+    assert backend.can_download()

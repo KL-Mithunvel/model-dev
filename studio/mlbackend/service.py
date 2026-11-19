@@ -121,6 +121,11 @@ class MLService:
                     raise ValueError("A click is outside the image.")
             if request.box is not None:
                 self._check_finite(request.box, "The box")
+                bx, by, bw, bh = request.box
+                if bw <= 0 or bh <= 0:
+                    raise ValueError("The box must have a width and a height above zero.")
+                if bx < 0 or by < 0 or bx + bw > request.width or by + bh > request.height:
+                    raise ValueError("The box is outside the image.")
         if request.task == TASK_DETECT_TEXT:
             text = request.text.strip()
             if not text:

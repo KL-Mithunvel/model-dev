@@ -42,7 +42,7 @@
 - [x] Stage 3 independent review done 2026-11-19: FAIL (1 blocker: an import whose rows were all invalid wiped the image's labels; 3 SHOULD, 4 NIT); fixed with 12 regression tests, 9 of which fail on the old code. No second review pass.
 - [x] Stage 3.3 built 2026-11-19 (plan approved by owner): immutable dataset versions, hash, export from a version, dialog, `versions` scenario 9/9, 15 backend tests. Not reviewed independently yet.
 - [x] Stage 5 (v0.7) built 2026-11-19 in the overnight run: hardware monitor (samplers, ring buffer, recorded runs, dashboard). Not independently reviewed, not tagged.
-- [x] Stage 4 (v0.6) partly built 2026-11-19: protocol, fake backend, review UX, SAM code. Not reviewed, not tagged.
+- [x] Stage 4 (v0.6) partly built 2026-11-19: protocol, fake backend, review UX, SAM code. One independent review done 2026-11-20 (no blocker, fixed); not tagged.
 - [ ] Stage 4: install `segment-anything` (`pip install --no-deps segment-anything==1.0`; blocked in the overnight session), download the 375 MB weights, and measure a real click (latency, VRAM, mask quality). Then 4.3 zero-shot detection.
 - [ ] Stage 3 / v0.5 still open: before v0.5: independent review, owner decision on CVAT keypoint (skeleton) support, try the files in a real CVAT / Label Studio; verify the `[U]` lines in `docs/FORMATS.md` and test the exports with an independent loader before tagging v0.5.
 - [x] `v0.4` tagged 2026-11-13 on f4e457b (owner approved; review PASS, findings fixed). Tags are local, not pushed.

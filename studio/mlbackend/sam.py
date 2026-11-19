@@ -50,6 +50,7 @@ class SamBackend:
             None  # (path, mtime_ns, size) of the image set
         )
         self._load_lock = threading.Lock()
+        self._download_lock = threading.Lock()  # one download at a time: they share one .part file
 
     # ---- state ------------------------------------------------------------------------------
     def weights_path(self) -> Path:
@@ -85,7 +86,12 @@ class SamBackend:
 
     def can_download(self) -> bool:
         """True when the only thing missing is the weight file."""
-        return torch is not None and sam_model_registry is not None and not self.info().available
+        return (
+            torch is not None
+            and sam_model_registry is not None
+            and not self.info().available
+            and not self._download_lock.locked()
+        )
 
     def health(self) -> tuple[bool, str]:
         reason = self._problem()
@@ -98,6 +104,14 @@ class SamBackend:
         cancelled: Callable[[], bool] = lambda: False,
     ) -> None:
         """Fetch the checkpoint to a temp file, check its size, then move it into place."""
+        if not self._download_lock.acquire(blocking=False):
+            raise BackendError("The model is already being downloaded.")
+        try:
+            self._download(progress, cancelled)
+        finally:
+            self._download_lock.release()
+
+    def _download(self, progress, cancelled) -> None:
         url, expected = self.settings["checkpoint_url"], self.settings["checkpoint_bytes"]
         target = self.weights_path()
         target.parent.mkdir(parents=True, exist_ok=True)

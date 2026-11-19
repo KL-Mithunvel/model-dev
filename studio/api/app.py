@@ -93,9 +93,9 @@ class RunStart(BaseModel):
 class SuggestRequest(BaseModel):
     backend: str
     task: str
-    points: list[tuple[float, float, int]] = []
+    points: list[tuple[float, float, int]] = Field(default=[], max_length=200)
     box: tuple[float, float, float, float] | None = None
-    text: str = ""
+    text: str = Field(default="", max_length=5000)
     max_results: int = Field(20, ge=1, le=100)
 
 
@@ -295,7 +295,11 @@ def create_app(
     def monitor_samples(
         after: int = Query(0, ge=0), seconds: float | None = Query(None, gt=0)
     ) -> dict[str, Any]:
+        reset = after > monitor.latest_seq  # the client saw a previous server process
+        if reset:
+            after = 0
         return {
+            "reset": reset,
             "samples": monitor.samples(after_seq=after, seconds=seconds),
             "catalog": monitor.catalog(),
             "warnings": monitor.warnings(),
@@ -306,7 +310,8 @@ def create_app(
     @app.websocket("/api/monitor/ws")
     async def monitor_live(websocket: WebSocket, after: int = 0) -> None:
         await websocket.accept()
-        last_seq, last_catalog = after, None
+        reset = after > monitor.latest_seq
+        last_seq, last_catalog = (0 if reset else after), None
         try:
             while True:
                 fresh = monitor.samples(after_seq=last_seq)
@@ -314,6 +319,7 @@ def create_app(
                     last_seq = fresh[-1]["seq"]
                     catalog = monitor.catalog()
                     message: dict[str, Any] = {
+                        "reset": reset,
                         "samples": fresh,
                         "warnings": monitor.warnings(),
                         "active_run": monitor.status()["active_run"],
@@ -322,7 +328,13 @@ def create_app(
                     if catalog != last_catalog:
                         message["catalog"], last_catalog = catalog, catalog
                     await websocket.send_json(message)
-                await asyncio.sleep(monitor.interval / 2)
+                    reset = False
+                try:  # wait for the next sample, but notice at once if the browser went away
+                    incoming = await asyncio.wait_for(websocket.receive(), monitor.interval / 2)
+                    if incoming["type"] == "websocket.disconnect":
+                        return
+                except TimeoutError:
+                    pass
         except WebSocketDisconnect:
             return
 

@@ -1344,6 +1344,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     canAdd,
     needClass,
     repaint: () => { renderShapes(); renderInspector(); },
+    repaintShapes: renderShapes,
     setTool,
     announce,
     toast,

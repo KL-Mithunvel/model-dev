@@ -19,7 +19,7 @@ const svgEl = (tag, attrs = {}) => {
 const MB = 1_000_000;
 
 /**
- * ctx: { imageId, classes(), activeClassId(), classById(id), newId, canAdd(n), addItems(items) -> ids,
+ * ctx: { repaintShapes() (canvas only: the slider calls it while being dragged), imageId, classes(), activeClassId(), classById(id), newId, canAdd(n), addItems(items) -> ids,
  *        needClass(), repaint(), setTool(name), announce(text), toast(message, options) }
  */
 export function createAssist(ctx) {
@@ -37,7 +37,7 @@ export function createAssist(ctx) {
   const textRow = el("div", { class: "row" }, textInput, findButton);
   const pointHint = el("p", { class: "hint", text: "Click an object on the image (tool M); it is outlined as a suggestion." });
   const downloadButton = el("button", { class: "btn", type: "button", "data-fk": "assist-download", onclick: () => startDownload() });
-  const slider = el("input", { type: "range", min: "0", max: "100", step: "5", value: "50", "data-fk": "assist-score", "aria-label": "Minimum score to show", oninput: () => { state.minScore = Number(slider.value) / 100; renderScore(); renderList(); ctx.repaint(); } });
+  const slider = el("input", { type: "range", min: "0", max: "100", step: "5", value: "50", "data-fk": "assist-score", "aria-label": "Minimum score to show", oninput: () => { state.minScore = Number(slider.value) / 100; renderScore(); renderList(); ctx.repaintShapes(); } });
   const scoreLabel = el("label", { class: "hint", for: "assist-score" });
   slider.id = "assist-score";
   const sliderRow = el("div", { class: "field" }, scoreLabel, slider);
@@ -188,8 +188,10 @@ export function createAssist(ctx) {
       const reply = await api("/api/ml/backends");
       if (disposed) return;
       state.backends = reply.backends;
-      state.minScore = reply.default_min_score;
-      slider.value = String(Math.round(state.minScore * 100));
+      if (!state.loaded) {  // the server default applies once; a later reload keeps the user's choice
+        state.minScore = reply.default_min_score;
+        slider.value = String(Math.round(state.minScore * 100));
+      }
       state.backendId = state.backends.find((b) => b.id === state.backendId)?.id ?? (usable()[0] ?? state.backends[0])?.id ?? null;
       const first = MODES.find(modeSupported);
       if (first && !modeSupported(MODES.find((m) => m.id === state.mode))) state.mode = first.id;

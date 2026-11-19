@@ -428,3 +428,62 @@ def test_migration_is_recorded(db_file):
         assert raw.execute("PRAGMA user_version").fetchone()[0] >= 4
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"monitor_runs", "monitor_samples"} <= tables
+
+
+# ---- review fixes --------------------------------------------------------------------------------
+def test_a_failed_stop_does_not_leave_the_run_recording(monitor, clock, monkeypatch):
+    tick(monitor, clock, 2)
+    run = monitor.start_run("will fail")
+    tick(monitor, clock, 2)
+
+    def broken(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(monitor, "_store_rows", broken)
+    with pytest.raises(sqlite3.OperationalError):
+        monitor.stop_run()
+    assert monitor.get_run(run["id"], with_samples=False)["status"] == "interrupted"
+    monitor.start_run("a new one is allowed")  # nothing is stuck
+
+
+def test_concurrent_start_calls_start_one_thread(hardware, db_file):
+    import threading
+
+    hardware["monitor_interval_s"] = 0.05
+    monitor = Monitor(hardware, db_file)
+    errors = []
+
+    def go():
+        try:
+            monitor.start()
+        except Exception as error:  # the old code raised "threads can only be started once"
+            errors.append(error)
+
+    threads = [threading.Thread(target=go) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    try:
+        assert errors == [] and monitor.running
+    finally:
+        monitor.stop()
+
+
+def test_a_client_from_an_older_process_is_told_to_reset(client):
+    monitor = client.app.state.monitor
+    monitor.tick()
+    assert client.get("/api/monitor/samples?after=5000").json()["reset"] is True
+    body = client.get("/api/monitor/samples?after=5000").json()
+    assert body["samples"]  # it gets the current samples from the start
+    assert client.get("/api/monitor/samples?after=1").json()["reset"] is False
+    with client.websocket_connect("/api/monitor/ws?after=5000") as socket:
+        first = socket.receive_json()
+        assert first["reset"] is True and first["samples"][0]["seq"] == 1
+
+
+def test_websocket_ends_when_the_browser_leaves(client):
+    client.app.state.monitor.tick()
+    with client.websocket_connect("/api/monitor/ws?after=0") as socket:
+        socket.receive_json()
+    # leaving the block closed the socket; the server task must have ended (no hang on exit)

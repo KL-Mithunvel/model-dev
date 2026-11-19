@@ -152,6 +152,9 @@ export async function mount(container, { setToolbar }) {
   let pollTimer = null;
   let stopped = false;
   let frameRequest = 0;
+  let shownWarnings = null;
+  let recordingText = null; // the live text of the Recording card, updated in place
+  let recordingId = null; // which run the Recording card was built for
 
   const deviceBox = el("section", { class: "card", "data-device": "" });
   const noticeBox = el("div", { class: "stack", "aria-live": "polite" });
@@ -222,7 +225,11 @@ export async function mount(container, { setToolbar }) {
       node.querySelector("i").style.height = `${Math.min(100, Math.max(0, value ?? 0))}%`;
       node.setAttribute("aria-label", `Thread ${node.textContent}: ${formatValue(value ?? null, "%")}`);
     }
-    noticeBox.replaceChildren(...warnings.map(noticeFor));
+    const noticeKey = warnings.map((w) => `${w.id}|${w.message}`).join("\n");
+    if (noticeKey !== shownWarnings) { // rebuilding every second would re-announce them to screen readers
+      shownWarnings = noticeKey;
+      noticeBox.replaceChildren(...warnings.map(noticeFor));
+    }
     drawRecord();
   }
 
@@ -233,14 +240,22 @@ export async function mount(container, { setToolbar }) {
   function drawRecord() {
     if (activeRun) {
       const latest = samples.length ? samples[samples.length - 1].t : activeRun.started_t;
-      recordBox.replaceChildren(
-        el("h3", { text: "Recording" }),
-        el("div", { class: "row" },
-          el("span", { "data-recording": "", text: `“${activeRun.name}” · ${formatDuration(latest - activeRun.started_t)}` }),
-          el("button", { class: "btn btn-danger", type: "button", id: "stop-run", text: "Stop recording", onclick: stopRun })),
-      );
+      const text = `“${activeRun.name}” · ${formatDuration(latest - activeRun.started_t)}`;
+      if (recordingId !== activeRun.id || !recordingText?.isConnected) {
+        // Built once per run: a button that is replaced every second can lose a click or its focus.
+        recordingId = activeRun.id;
+        recordingText = el("span", { "data-recording": "", text });
+        recordBox.replaceChildren(
+          el("h3", { text: "Recording" }),
+          el("div", { class: "row" }, recordingText,
+            el("button", { class: "btn btn-danger", type: "button", id: "stop-run", text: "Stop recording", onclick: stopRun })),
+        );
+      } else if (recordingText.textContent !== text) {
+        recordingText.textContent = text;
+      }
       return;
     }
+    recordingId = null;
     if (recordBox.querySelector("#run-name")) return; // do not rebuild a field the user may be typing in
     const input = el("input", { class: "input", id: "run-name", type: "text", maxlength: String(status.max_run_name_length), placeholder: "e.g. Baseline training", autocomplete: "off" });
     const problem = el("p", { class: "error-text", role: "alert" });
@@ -330,6 +345,7 @@ export async function mount(container, { setToolbar }) {
       activeRun = message.active_run;
       if (was && !activeRun) loadRuns(); // a run was stopped elsewhere (for example by training ending)
     }
+    if (message.reset) samples = []; // the server restarted: its sample numbers began again
     samples = samples.concat(message.samples ?? []);
     const cutoff = (samples.length ? samples[samples.length - 1].t : 0) - status.buffer_seconds;
     samples = samples.filter((sample) => sample.t >= cutoff);

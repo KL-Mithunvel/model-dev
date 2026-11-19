@@ -138,9 +138,10 @@ class Monitor:
             if self._thread is not None and self._thread.is_alive():
                 return
             self._stop.clear()
-            self._thread = threading.Thread(target=self._loop, name="hardware-monitor", daemon=True)
+            thread = threading.Thread(target=self._loop, name="hardware-monitor", daemon=True)
+            self._thread = thread
+            thread.start()
         self.tick()  # the dashboard has something to show immediately
-        self._thread.start()
 
     def stop(self) -> None:
         """Stop the thread, close an open recording cleanly, and release the samplers."""
@@ -154,6 +155,11 @@ class Monitor:
             close = getattr(sampler, "close", None)
             if close:
                 close()
+
+    @property
+    def latest_seq(self) -> int:
+        """Sequence number of the newest sample; restarts at 0 in a new process."""
+        return self._seq
 
     @property
     def running(self) -> bool:
@@ -311,23 +317,41 @@ class Monitor:
             self._active = None
             self.run_epoch += 1
             rows = [active.flush(self._clock())] if active.bucket else []
-        self._store_rows(active, rows)
-        conn = self._connect()
         try:
-            conn.execute(
-                "UPDATE monitor_runs SET status = 'finished', ended_at = ?, summary = ?,"
-                " catalog = ? WHERE id = ?",
-                (
-                    db.utc_now(),
-                    json.dumps(active.summary()),
-                    json.dumps(_catalog_for_storage(self.catalog(), active.totals)),
-                    active.run_id,
-                ),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+            self._store_rows(active, rows)
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE monitor_runs SET status = 'finished', ended_at = ?, summary = ?,"
+                    " catalog = ? WHERE id = ?",
+                    (
+                        db.utc_now(),
+                        json.dumps(active.summary()),
+                        json.dumps(_catalog_for_storage(self.catalog(), active.totals)),
+                        active.run_id,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            self._mark_interrupted(active.run_id)  # never leave a dead run showing "recording"
+            raise
         return self.get_run(active.run_id, with_samples=False)
+
+    def _mark_interrupted(self, run_id: int) -> None:
+        try:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE monitor_runs SET status = 'interrupted', ended_at = ? WHERE id = ?",
+                    (db.utc_now(), run_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            logger.exception("could not mark run %s interrupted", run_id)
 
     def _store_rows(
         self, recording: _Recording, rows: list[tuple[float, dict[str, float]]]

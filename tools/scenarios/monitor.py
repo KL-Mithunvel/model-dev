@@ -59,7 +59,10 @@ async def run(s):
     await s.press("Enter")
     await s.wait_for("document.querySelector('[data-recording]')")
     s.check("recording shows the run name", "Overnight check" in await s.js("document.querySelector('[data-recording]').innerText"))
-    await s.wait_for("document.querySelector('[data-recording]').innerText.includes('0:03')")  # real seconds: pause() is skipped when headless
+    await s.js("window.__stop = document.querySelector('#stop-run')")
+    await s.wait_for("document.querySelector('[data-recording]').innerText.includes('0:03')")
+    s.check("the Stop button is the same element after several samples (not rebuilt)",
+            await s.js("document.querySelector('#stop-run') === window.__stop"))  # real seconds: pause() is skipped when headless
     await s.click("#stop-run")
     await s.wait_for("document.querySelector('[data-runs] [data-view]:not([disabled])')")  # the row exists while recording, but View is disabled
     row = await s.js("document.querySelector('[data-runs] [data-run]').innerText")

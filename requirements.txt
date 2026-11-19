@@ -23,4 +23,5 @@ PyYAML==6.0.3
 
 # Dev / test
 pytest==9.2.0
+pycocotools==2.0.11  # independent COCO loader for tests (tests only; licence to confirm: believed BSD-style, from the COCO API)
 ruff==0.17.4

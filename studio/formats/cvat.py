@@ -11,6 +11,7 @@ by type, never dropped silently.
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping, Sequence
 from typing import Any
+from xml.parsers import expat
 
 SUPPORTED = ("box", "polygon")
 
@@ -86,11 +87,16 @@ def parse(xml_text: str | bytes) -> dict[str, Any]:
     "data"}]}], "skipped": [str, ...]}``.
     """
     raw = xml_text.encode("utf-8") if isinstance(xml_text, str) else xml_text
-    if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
+    def refuse(*_args: Any) -> None:  # runs in whatever encoding the file uses (e.g. UTF-16)
         raise CvatError("This XML declares entities or a DOCTYPE, which is refused for safety.")
+
+    scanner = expat.ParserCreate()
+    scanner.StartDoctypeDeclHandler = refuse
+    scanner.EntityDeclHandler = refuse
     try:
+        scanner.Parse(raw, True)
         root = ET.fromstring(raw)
-    except ET.ParseError as error:
+    except (ET.ParseError, expat.ExpatError) as error:
         raise CvatError(f"This is not valid XML: {error}") from error
     if root.tag != "annotations":
         raise CvatError("This does not look like CVAT for images: the root is not <annotations>.")

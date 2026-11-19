@@ -230,6 +230,7 @@ _Not yet filled — update before the first session._
 
 ## Known Technical Debt
 
+- **Stage 3 independent review: FAIL (1 blocker), all fixed 2026-11-19; a second review pass was not run.** Left as debt: label import reads every `*.json` under the chosen folder in full, twice, with no size cap (consistent with the import dialog's trust model); Label Studio hidden keypoints return visible (disclosed in the export notes); real CVAT / Label Studio / Ultralytics acceptance of our files is untested.
 - **v0.4 (keypoints) independent review: PASS (2026-11-13), its 4 SHOULD and 3 NIT findings fixed the same day; a second review pass was not run.** Edges are only drawn for labelled points; there is no per-point colour; per-point names are not drawn on the canvas (they appear in the inspector and the placement hint; the class label sits above the pose). Changing a class skeleton's length is blocked while keypoint annotations use it, with no migration tool.
 - **`tests/test_smoke.py::test_cuda_is_visible_when_present` can fail with a Windows `OSError` loading a torch DLL** when many browser processes are running (seen once after a long browser run; passes when the machine is quiet). `dev_run` start-up also flakes now and then ("Could not connect to the browser's debugging port"); a retry passes.
 

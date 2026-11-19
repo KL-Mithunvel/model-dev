@@ -180,7 +180,7 @@ def parse(
         if not isinstance(task, Mapping) or not isinstance(task.get("data"), Mapping):
             skipped.append("an item without a 'data' object was ignored")
             continue
-        source = next((v for v in task["data"].values() if isinstance(v, str)), None)
+        source = _image_reference(task["data"])
         if not source:
             skipped.append(f"task {task.get('id')}: no image reference in 'data'")
             continue
@@ -279,3 +279,18 @@ def _size(item: Mapping[str, Any], record: Mapping[str, Any]) -> tuple[float, fl
             "has no original_width / original_height, so percentages cannot be converted"
         )
     return float(w), float(h)
+
+
+IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff")
+
+
+def _image_reference(data: Mapping[str, Any]) -> str | None:
+    """The task's image: the ``image`` field, else the first value that looks like an image file."""
+    value = data.get("image")
+    if isinstance(value, str) and value:
+        return value
+    strings = [v for v in data.values() if isinstance(v, str) and v]
+    for candidate in strings:
+        if candidate.lower().split("?")[0].endswith(IMAGE_SUFFIXES):
+            return candidate
+    return strings[0] if strings else None

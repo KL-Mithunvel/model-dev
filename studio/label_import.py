@@ -130,7 +130,10 @@ def _find_yolo(root: Path) -> tuple[Path | None, dict[str, Any]]:
 def _names_of(content: dict[str, Any]) -> list[str]:
     names = content.get("names")
     if isinstance(names, dict):
-        return [str(names[k]) for k in sorted(names, key=lambda k: int(k))]
+        try:
+            return [str(names[k]) for k in sorted(names, key=lambda k: int(k))]
+        except (TypeError, ValueError):
+            return [str(names[k]) for k in sorted(names, key=str)]  # odd keys: still no crash
     if isinstance(names, list):
         return [str(n) for n in names]
     return []
@@ -235,6 +238,17 @@ def _apply(conn: sqlite3.Connection, config: dict[str, Any], project_id: int, ro
 
     # image id -> (list of {class_id, kind, data}, mark_empty)
     pending: dict[int, tuple[list[dict[str, Any]], bool]] = {}
+    origin: dict[int, str] = {}  # image id -> the label file that claimed it (first one wins)
+
+    def claim(row: sqlite3.Row, source: str, label: str) -> bool:
+        """An image takes labels from ONE file: a second file naming it is reported and ignored."""
+        first = origin.setdefault(row["id"], source)
+        if first != source:
+            report["skipped"].append(
+                f"{label}: also in {first}; kept the labels from {first}, ignored {source}"
+            )
+            return False
+        return True
 
     def find_image(key: str, table: dict[str, list[sqlite3.Row]], label: str):
         matches = table.get(key.lower(), [])
@@ -246,7 +260,9 @@ def _apply(conn: sqlite3.Connection, config: dict[str, Any], project_id: int, ro
             return None
         return matches[0]
 
-    def take(image: dict[str, Any], row: sqlite3.Row, pairs: list[tuple[Any, ...]]) -> None:
+    def take(
+        image: dict[str, Any], row: sqlite3.Row, pairs: list[tuple[Any, ...]], source: str
+    ) -> None:
         """Queue one file entry's annotations for ``row`` (a size mismatch skips the image)."""
         if (
             image["width"]
@@ -258,6 +274,8 @@ def _apply(conn: sqlite3.Connection, config: dict[str, Any], project_id: int, ro
                 f"file but {row['width']}x{row['height']} here; skipped "
                 "(coordinates would be wrong)"
             )
+            return
+        if not claim(row, source, image["file_name"]):
             return
         items = []
         for name, skeleton, kind, data in pairs:
@@ -291,7 +309,7 @@ def _apply(conn: sqlite3.Connection, config: dict[str, Any], project_id: int, ro
                     )
                     continue
                 pairs.append((category["name"], category["skeleton"], ann["kind"], ann["data"]))
-            take(image, row, pairs)
+            take(image, row, pairs, path.name)
 
     def name_lookup(name: str) -> sqlite3.Row | None:
         """Match a CVAT / Label Studio file reference (path, URL, upload prefix) to an image."""
@@ -314,7 +332,7 @@ def _apply(conn: sqlite3.Connection, config: dict[str, Any], project_id: int, ro
                 report["unmatched_images"].append(image["file_name"])
                 continue
             pairs = [(a["label"], None, a["kind"], a["data"]) for a in image["annotations"]]
-            take(image, row, pairs)
+            take(image, row, pairs, path.name)
 
     for path in cvat_files:
         try:
@@ -328,12 +346,19 @@ def _apply(conn: sqlite3.Connection, config: dict[str, Any], project_id: int, ro
         except (labelstudio.LabelStudioError, OSError, ValueError) as error:
             raise LabelImportFailed(f"{path.name}: {error}") from error
 
+    if label_files and others:
+        report["skipped"].append(
+            f"{len(label_files)} YOLO label file(s) were ignored because this source also holds "
+            f"{detected.upper()} labels; import them from a folder of their own"
+        )
     if label_files and not others:
         names = _names_of(yaml_content)
         kpt = yaml_content.get("kpt_shape")
         for path in label_files:
             row = find_image(path.stem, by_stem, path.name)
             if row is None:
+                continue
+            if not claim(row, str(path.relative_to(root)), path.name):
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
@@ -377,6 +402,13 @@ def _apply(conn: sqlite3.Connection, config: dict[str, Any], project_id: int, ro
                 report["skipped"].append(f"{names_of_image[image_id]}: {error}")
                 continue
             good.append({"class_id": item["class_id"], **checked})
+        if not good and not mark_empty:
+            # Nothing usable came out of the file: keep the labels the image already has.
+            report["skipped"].append(
+                f"{names_of_image[image_id]}: no usable annotation in the file, so the existing "
+                "labels were left as they are"
+            )
+            continue
         state = ra.get_annotations(conn, image_id)
         try:
             ra.save_annotations(

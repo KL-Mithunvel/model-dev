@@ -97,3 +97,12 @@
 - Decisions: CVAT keypoints are not exported (skeleton XML unverified); Label Studio loses hidden-vs-visible and unlabelled points (reported in the export notes, tested); XML with DOCTYPE/ENTITY is refused; shapes we cannot read are listed by type.
 - Tests: `tests/test_adapters.py` (pure + round trips through the API). Not verified against real CVAT / Label Studio instances; the upload-prefix matching rule is from memory.
 - Mistake caught: I ran `ruff format` over `studio tests`, which reformatted 8 unrelated files; reverted them with `git checkout` (they had no edits of mine). The repo is not ruff-format clean, so only format files you wrote.
+
+## 2026-11-19 — Stage 3 independent review and fixes
+- Fresh-context reviewer (read-only; ran pytest, ruff, node tests, export_import scenario, plus its own probes): **FAIL**, 1 BLOCKER, 3 SHOULD, 5 NIT. Fixed in this commit:
+  - BLOCKER: label import replaced an image's annotations even when every imported row was invalid (zero-area YOLO box + junk line; COCO box clamped to nothing) -> labels wiped. Now such an image is left untouched and reported; a blank YOLO file still means "no objects".
+  - SHOULD: duplicate YOLO stems across splits (last one silently won), the same image in two COCO/CVAT/Label Studio files (annotations doubled) -> an image takes labels from ONE file, the first; the rest is reported. A source holding COCO/CVAT/LS plus YOLO now reports the ignored YOLO files.
+  - NIT: UTF-16 DOCTYPE slipped past the byte check -> entities/DOCTYPE are now refused by an expat pre-scan in any encoding; `names: {a: x}` in data.yaml crashed with a 500; Label Studio took the first string of `data` as the image -> prefers `image`, then a value that looks like an image file.
+  - Not fixed (debt in CLAUDE.md): unbounded JSON reads in a big folder; hidden keypoints return visible (by design, disclosed).
+- Tests: `tests/test_label_import_safety.py` (12). Run against the pre-fix code, 9 fail and 3 pass (the controls), so they do detect the bugs. No second review pass.
+- Mistake in my own first fix: I tried `ET.XMLParser().parser` for the entity guard; the C parser has no such attribute (caught by the new tests); switched to `xml.parsers.expat`.

@@ -111,3 +111,14 @@
 textarea.input { resize: vertical; font-family: inherit; line-height: 1.4; }
 .kp-fields summary { cursor: pointer; font-weight: 600; margin-bottom: var(--sp-2); }
 .kp-fields .row { margin-bottom: var(--sp-2); }
+
+/* ---- AI assist (Stage 4) ------------------------------------------------------------------ */
+.stage[data-tool="assist"] { cursor: crosshair; }
+.suggest-layer { pointer-events: none; }
+.stage[data-tool="assist"] .suggest-layer [data-suggest] { pointer-events: all; cursor: copy; }
+.assist .row .input { flex: 1; min-width: 0; }
+.assist .seg button { white-space: nowrap; }
+.sug-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.sug-list li { display: flex; align-items: center; gap: var(--sp-1); }
+.sug-list li .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-13); }
+.sug-list .btn { min-height: 28px; padding: 0 var(--sp-2); }

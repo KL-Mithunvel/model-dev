@@ -135,6 +135,8 @@ Goal: speed up labelling without sending data anywhere.
 - **4.4 Review UX** — Predictions appear as dashed "suggestions"; accept, edit or reject individually or in bulk; confidence filter.
   Success: protocol contract tests pass with a fake backend; SAM click returns a mask in under 2 s on the RTX; nothing is saved without user acceptance; fits in 6 GB VRAM.
 
+  **Status 2026-11-19 (overnight run): partly built, not reviewed.** Built and tested: 4.1 protocol + `docs/ML_BACKEND.md`, the fake backend, the service (request checks, result validation), 4.4 review UX (tool `M`, dashed suggestions, score filter, accept/reject/undo; scenario `assist` 16/16 three times), mask-to-polygon. Written but NOT verified: 4.2 SAM (the package install was denied, so no real mask was produced, no latency or VRAM figure exists, and the "under 2 s" and "fits in 6 GB" criteria are open). Not built: 4.3 zero-shot text detection (licence and VRAM check pending).
+
 ### Stage 5 — Hardware monitor (v0.7)
 Goal: see what the machine is doing, live and historically.
 - **5.1 Samplers** — psutil (CPU per core, RAM, disk I/O), NVML (util, VRAM, temp, power, clocks), Intel best-effort (Windows performance counters), each behind a common interface with graceful "unavailable".

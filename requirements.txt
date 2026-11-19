@@ -31,3 +31,7 @@ ruff==0.17.4
 # Both are optional at run time: the samplers report "unavailable" if a library or GPU is missing.
 psutil==7.2.2
 nvidia-ml-py==13.615.71
+
+# AI assist (Stage 4). Optional: without it the 'sam' backend says it is not installed.
+# segment-anything 1.0 (Apache-2.0, checked 2026-11-19): install with `pip install --no-deps segment-anything==1.0` (torch is already above).
+# Not pinned as a requirement line because it was never installed or run in the overnight session.

@@ -15,6 +15,7 @@ export const SHORTCUTS = [
 
 export const ANNOTATOR_SHORTCUTS = [
   ["Select / Box / Polygon / Keypoints / Pan tool", ["V", "B", "P", "K", "H"]],
+  ["AI assist tool: click an object to outline it; Enter accepts the shown suggestions, Esc rejects them", ["M"]],
   ["Keypoints: place the next point (hidden), skip it, step back", ["click (Shift+click)", "X", "Backspace"]],
   ["Keypoints: finish early, drop a whole pose with the keyboard", ["Enter"]],
   ["Keypoints: pick a point, change visible / hidden / not labelled", ["[ ]", "O"]],

@@ -2,6 +2,7 @@
 // Pure logic lives in geometry.js, editor.js, history.js and saver.js (all unit-tested); this file
 // is the DOM, pointer and keyboard glue around them.
 import { api, ApiError } from "../api.js";
+import { createAssist } from "../assist.js";
 import { openClassDialog } from "../classes.js";
 import {
   addBox, appendFromServer, canMarkEmpty, cycle, deleteAnnotations, dropUnknownClasses,
@@ -18,6 +19,7 @@ import {
 import { createHistory } from "../history.js";
 import { limits } from "../limits.js";
 import { clearDraft, createSaver, readDraft } from "../saver.js";
+import { addAnnotations } from "../suggest.js";
 import { el, enableRadioArrows, icon, isTyping, plural, rovingTabindex, toast } from "../ui.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -64,6 +66,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   let stats = null;
   let history = null;
   let saver = null;
+  let assist = null; // created once the editing functions below exist
   let initialLabelled = false;
   let width = 0;
   let height = 0;
@@ -76,7 +79,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   // ---- skeleton ---------------------------------------------------------------------------
   const toolstrip = el("div", { class: "toolstrip", role: "toolbar", "aria-label": "Tools", "aria-orientation": "vertical" });
   const viewport = el("div", { class: "viewport" });
-  const stage = el("div", { class: "stage", tabindex: "0", role: "application", "aria-label": "Image canvas. B draws boxes, P draws polygons, K places keypoints, Enter drops a default shape in the middle, V selects, H or Space pans, A and D change image. Press ? for all shortcuts." }, viewport);
+  const stage = el("div", { class: "stage", tabindex: "0", role: "application", "aria-label": "Image canvas. B draws boxes, P draws polygons, K places keypoints, M outlines an object you click with AI, Enter drops a default shape in the middle, V selects, H or Space pans, A and D change image. Press ? for all shortcuts." }, viewport);
   const hud = el("div", { class: "hud", "aria-hidden": "true" });
   const kpHint = el("div", { class: "kp-hint", hidden: true });
   const banner = el("div", { class: "a-banner", role: "status", hidden: true });
@@ -376,6 +379,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     draftLayer = svgEl("g", { "pointer-events": "none" });
     svg.append(draftLayer);
     renderPolygonDraft();
+    assist?.draw(svg, scale);
   }
 
   /** The polygon being drawn, in its own layer so moving the pointer never rebuilds the real shapes. */
@@ -431,7 +435,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     const tool = (name, label, iconName, key) => el("button", { class: "btn btn-quiet btn-icon", type: "button", "aria-label": `${label} (${key})`, title: `${label} (${key})`, "aria-pressed": String(ui.tool === name), ...fk(`tool:${name}`), onclick: () => setTool(name) }, icon(iconName));
     const plain = (label, iconName, handler, disabled = false) => el("button", { class: "btn btn-quiet btn-icon", type: "button", "aria-label": label, title: label, disabled, ...fk(`btn:${label}`), onclick: handler }, icon(iconName));
     rebuild(toolstrip, () => [
-      tool("select", "Select", "cursor", "V"), tool("box", "Draw box", "box", "B"), tool("polygon", "Draw polygon", "polygon", "P"), tool("keypoints", "Place keypoints", "keypoints", "K"), tool("pan", "Pan", "move", "H"),
+      tool("select", "Select", "cursor", "V"), tool("box", "Draw box", "box", "B"), tool("polygon", "Draw polygon", "polygon", "P"), tool("keypoints", "Place keypoints", "keypoints", "K"), tool("assist", "AI assist: click an object", "sparkle", "M"), tool("pan", "Pan", "move", "H"),
       el("hr", { class: "tool-sep" }),
       plain("Zoom in (+)", "zoom-in", () => zoomStep(1.25)), plain("Zoom out (−)", "zoom-out", () => zoomStep(0.8)), plain("Fit to window (0)", "fit", fit),
       el("hr", { class: "tool-sep" }),
@@ -452,6 +456,8 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
           el("p", { class: "muted num", text: `Image ${neighbours.index} of ${neighbours.total} · ${labelledNow.toLocaleString()} of ${total.toLocaleString()} labelled` }),
           el("div", { class: "progress", role: "progressbar", "aria-label": "Labelling progress", "aria-valuemin": "0", "aria-valuemax": String(total), "aria-valuenow": String(labelledNow) }, el("div", { style: `width:${total ? (labelledNow / total) * 100 : 0}%` }))),
       );
+      assist.refreshClasses();
+      parts.push(assist.panel);
       // image label (single-label classification)
       parts.push(
         el("div", { class: "a-section" }, el("h3", { text: "Image label" }),
@@ -592,7 +598,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     if (name !== ui.tool && blockWhileDrawing()) return;
     ui.tool = name;
     renderToolstrip();
-    announce(`${{ box: "Box", polygon: "Polygon", keypoints: "Keypoints", pan: "Pan" }[name] ?? "Select"} tool`);
+    announce(`${{ box: "Box", polygon: "Polygon", keypoints: "Keypoints", assist: "AI assist", pan: "Pan" }[name] ?? "Select"} tool`);
     stage.focus({ preventScroll: true }); // so Enter / arrows / [ ] go to the canvas, not to the tool button
   }
   function needClass() {
@@ -1079,6 +1085,12 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       return;
     }
     if (event.button !== 0) return;
+    if (ui.tool === "assist") {
+      const suggestionId = assist.idAt(event.target);
+      if (suggestionId) { assist.acceptId(suggestionId); return; } // a click on a suggestion accepts it
+      if (p.x >= 0 && p.y >= 0 && p.x <= width && p.y <= height) assist.requestPoint(p, !event.altKey);
+      return;
+    }
     if (ui.tool === "polygon") {
       if (activeClassId() === null) {
         ui.drag = { type: "needclass" };
@@ -1275,6 +1287,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
     else if (lower === "b") setTool("box");
     else if (lower === "p") setTool("polygon");
     else if (lower === "k") setTool("keypoints");
+    else if (lower === "m") setTool("assist");
     else if (lower === "h") setTool("pan");
     else if (key === "0") fit();
     else if (key === "+" || key === "=") zoomStep(1.25);
@@ -1294,8 +1307,10 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
       else if (ui.poly) { event.preventDefault(); ui.poly = null; renderShapes(); announce("Polygon cancelled"); }
       else if (ui.kp) { event.preventDefault(); cancelKeypoints(); }
       else if (ui.vertex) { event.preventDefault(); ui.vertex = null; renderShapes(); }
+      else if (assist.hasSuggestions()) { event.preventDefault(); assist.rejectAll(); }
       else if (ui.selection.size) { event.preventDefault(); ui.selection.clear(); renderAll(); }
-    } else if (key === "Enter" && onStage && ui.tool === "polygon") { event.preventDefault(); if (ui.poly) finishPolygon(); else polygonAtCentre(); }
+    } else if (key === "Enter" && onStage && ui.tool === "assist" && assist.hasSuggestions()) { event.preventDefault(); assist.acceptShown(); }
+    else if (key === "Enter" && onStage && ui.tool === "polygon") { event.preventDefault(); if (ui.poly) finishPolygon(); else polygonAtCentre(); }
     else if (key === "Enter" && onStage && ui.tool === "keypoints") { event.preventDefault(); if (ui.kp) finishKeypoints(); else keypointsAtCentre(); }
     else if (lower === "x" && onStage && ui.tool === "keypoints") { event.preventDefault(); skipKeypoint(); }
     else if (lower === "o" && onStage) { if (cycleCurrentKeypoint()) event.preventDefault(); }
@@ -1317,6 +1332,27 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
   });
   listen(document, "keyup", (event) => {
     if (event.key === " ") { ui.space = false; stage.classList.remove("space-pan"); }
+  });
+
+  // ---- AI assist --------------------------------------------------------------------------
+  assist = createAssist({
+    imageId,
+    classes: () => classes,
+    activeClassId,
+    classById,
+    newId,
+    canAdd,
+    needClass,
+    repaint: () => { renderShapes(); renderInspector(); },
+    setTool,
+    announce,
+    toast,
+    addItems: (items) => {
+      commit(addAnnotations(history.present, items));
+      ui.selection = new Set(items.map((item) => item.id));
+      renderAll();
+      toast(`Added ${plural(items.length, "annotation")} from suggestions`, { actionLabel: "Undo", onAction: undo });
+    },
   });
 
   // ---- start ------------------------------------------------------------------------------
@@ -1349,6 +1385,7 @@ export async function mount(container, { setToolbar, navigate, projectId, imageI
 
   return () => {
     for (const undoListener of cleanups) undoListener();
+    assist.dispose();
     if (saver) {
       const done = saver;
       done.flush().finally(() => done.dispose()); // finish saving in the background after leaving

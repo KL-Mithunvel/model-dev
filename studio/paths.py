@@ -30,3 +30,8 @@ def images_dir(config: dict[str, Any], project_id: int) -> Path:
 def thumbs_dir(config: dict[str, Any], project_id: int) -> Path:
     """Return the folder with the project's thumbnails."""
     return project_dir(config, project_id) / "thumbs"
+
+
+def models_dir(config: dict[str, Any]) -> Path:
+    """Return the folder for downloaded model weights (cached once, then used offline)."""
+    return data_dir(config) / "models"

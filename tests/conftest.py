@@ -20,6 +20,7 @@ def config(tmp_path):
     # Tests never read real hardware or run a sampling thread unless they ask for it.
     cfg["hardware"]["sampler"] = "fake"
     cfg["hardware"]["autostart"] = False
+    cfg["ml"]["backends"] = ["fake"]  # tests never load a real model
     return cfg
 
 

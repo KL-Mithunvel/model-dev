@@ -85,6 +85,21 @@ hardware:
     vram_total_gb: 6.0
     cores: 8
 
+ml:                              # AI assist (Stage 4); suggestions are never saved without an explicit accept
+  backends: [sam]                # which backends to offer: sam | fake (fake returns made-up results, for tests and demos)
+  allow_remote_backends: false   # a backend that sends images off this computer stays disabled unless this is true
+  max_text_length: 200           # characters in a "describe objects" prompt
+  max_prompt_points: 20          # clicks used in one request
+  max_suggestions: 50            # most suggestions returned per request
+  default_min_score: 0.5         # the review panel starts hiding suggestions below this score
+  sam:
+    model_type: vit_b
+    checkpoint_filename: sam_vit_b_01ec64.pth
+    checkpoint_url: https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth
+    checkpoint_bytes: 375042383  # checked 2026-11-19 from the server's Content-Length; a different size means a broken download
+    download_timeout_s: 60
+    polygon_epsilon_px: 1.5      # outline simplification; larger = fewer points
+
 training:
   seed: 42
   vram_headroom_fraction: 0.10   # keep this share of VRAM free when suggesting batch size; provisional

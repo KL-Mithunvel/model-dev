@@ -46,6 +46,7 @@ const ICONS = {
   check: "M5 12l5 5 9-10",
   edit: "M4 20h4L19 9l-4-4L4 16zM14 6l4 4",
   copy: "M8 8h12v12H8zM4 16V4h12",
+  sparkle: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z",
   chip: "M7 7h10v10H7zM10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4",
 };
 

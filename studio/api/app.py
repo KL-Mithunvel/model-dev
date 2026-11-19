@@ -28,6 +28,8 @@ from studio import repo_annotations as annotations_repo
 from studio.config import load_config
 from studio.hardware.monitor import Monitor, RunActive
 from studio.jobs import JobManager
+from studio.mlbackend.protocol import BackendError, PredictRequest
+from studio.mlbackend.service import MLService
 
 logger = logging.getLogger(__name__)
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -88,6 +90,15 @@ class RunStart(BaseModel):
     name: str
 
 
+class SuggestRequest(BaseModel):
+    backend: str
+    task: str
+    points: list[tuple[float, float, int]] = []
+    box: tuple[float, float, float, float] | None = None
+    text: str = ""
+    max_results: int = Field(20, ge=1, le=100)
+
+
 class AutoSplitRequest(BaseModel):
     ratios: dict[str, float] | None = None
     seed: int | None = None
@@ -104,6 +115,7 @@ def create_app(
         db.migrate(setup_conn)
     jobs = JobManager(keep_finished=config["jobs"]["keep_finished"])
     monitor = Monitor(config["hardware"], database_file)
+    ml = MLService(config)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -118,6 +130,7 @@ def create_app(
     app.state.db_path = database_file
     app.state.jobs = jobs
     app.state.monitor = monitor
+    app.state.ml = ml
     app.add_middleware(
         TrustedHostMiddleware, allowed_hosts=allowed_hosts or config["app"]["allowed_hosts"]
     )
@@ -352,6 +365,57 @@ def create_app(
         except LookupError as error:
             raise HTTPException(404, str(error)) from error
         return Response(status_code=204)
+
+    # ---- AI assist (Stage 4) ------------------------------------------------------------------
+    # Suggestions are returned, never stored: only the annotator's normal save (after the user
+    # accepts) puts anything into the dataset.
+    @app.get("/api/ml/backends")
+    def ml_backends() -> dict[str, Any]:
+        backends = []
+        for info in ml.infos():
+            entry = info.as_dict()
+            backend = ml.backend(info.id)
+            entry["can_download"] = bool(getattr(backend, "can_download", lambda: False)())
+            backends.append(entry)
+        return {"backends": backends, "default_min_score": config["ml"]["default_min_score"]}
+
+    @app.post("/api/ml/backends/{backend_id}/download", status_code=202)
+    def ml_download(backend_id: str) -> dict[str, str]:
+        backend = ml.backend(backend_id)
+        if backend is None or not hasattr(backend, "download_weights"):
+            raise HTTPException(404, f"There is nothing to download for “{backend_id}”.")
+        if not backend.can_download():
+            reason = ml.info(backend_id).reason or "The model is already installed."
+            raise HTTPException(409, reason)
+
+        def run(progress, cancelled) -> dict[str, Any]:
+            backend.download_weights(lambda p: progress(p["done"], p["total"], {}), cancelled)
+            return {"downloaded": backend_id}
+
+        return {"job_id": jobs.submit(run, kind="download")}
+
+    @app.post("/api/images/{image_id}/suggest")
+    def suggest(
+        image_id: ID, body: SuggestRequest, conn: sqlite3.Connection = Conn
+    ) -> dict[str, Any]:
+        image = repo.get_image(conn, image_id)
+        if image is None:
+            raise HTTPException(404, f"Image {image_id} not found.")
+        request = PredictRequest(
+            task=body.task,
+            image_path=paths.images_dir(config, image["project_id"]) / image["stored_name"],
+            width=image["width"], height=image["height"], points=tuple(body.points),
+            box=body.box, text=body.text, max_results=body.max_results,
+        )
+        try:
+            result = ml.predict(body.backend, request)
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from error
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        except BackendError as error:
+            raise HTTPException(409, str(error)) from error
+        return result.as_dict(body.backend, body.task)
 
     @app.get("/api/projects/{project_id}/batches")
     def list_batches(project_id: ID, conn: sqlite3.Connection = Conn) -> list[dict[str, Any]]:

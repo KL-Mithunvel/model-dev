@@ -18,3 +18,6 @@ select = ["E", "F", "I", "B", "UP"]
 "tools/scenarios/*.py" = ["E501"]
 # Warning texts are one readable sentence each; splitting them across lines only hides them.
 "studio/hardware/warnings.py" = ["E501"]
+# Docstring sentences in the ML package run a few characters past the limit; wrapping them hurts readability.
+"studio/mlbackend/*.py" = ["E501"]
+"tests/test_mlbackend.py" = ["E501"]

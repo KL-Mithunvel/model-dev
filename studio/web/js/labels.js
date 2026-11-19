@@ -14,7 +14,9 @@ const FORMAT_NAMES = { coco: "COCO", yolo: "YOLO", cvat: "CVAT", labelstudio: "L
 
 const query = (choice, images) => `format=${choice.format}&task=${choice.task}&images=${images}`;
 
-export function openExportDialog({ projectId }) {
+export function openExportDialog({ projectId = null, versionId = null, title = "Export labels" }) {
+  // A live project, or a frozen dataset version (same formats, same zip layout).
+  const base = versionId ? `/api/versions/${versionId}` : `/api/projects/${projectId}`;
   let choice = CHOICES[0];
   let withImages = true;
   const problem = el("p", { class: "error-text", role: "alert" });
@@ -25,7 +27,7 @@ export function openExportDialog({ projectId }) {
     problem.textContent = "";
     summary.textContent = "Checking…";
     try {
-      const r = await api(`/api/projects/${projectId}/export/preview?${query(choice, withImages)}`);
+      const r = await api(`${base}/export/preview?${query(choice, withImages)}`);
       const notes = [];
       if (r.excluded_unlabelled) notes.push(`${plural(r.excluded_unlabelled, "unlabelled image")} left out`);
       if (r.excluded_unassigned) notes.push(`${plural(r.excluded_unassigned, "image")} without a split left out`);
@@ -50,12 +52,12 @@ export function openExportDialog({ projectId }) {
   const download = async () => {
     problem.textContent = "";
     try {
-      await api(`/api/projects/${projectId}/export/preview?${query(choice, withImages)}`); // explains a refusal in words
+      await api(`${base}/export/preview?${query(choice, withImages)}`); // explains a refusal in words
     } catch (error) {
       problem.textContent = error.message;
       return;
     }
-    const link = el("a", { href: `/api/projects/${projectId}/export?${query(choice, withImages)}`, download: "" });
+    const link = el("a", { href: `${base}/export?${query(choice, withImages)}`, download: "" });
     document.body.append(link);
     link.click();
     link.remove();
@@ -64,7 +66,7 @@ export function openExportDialog({ projectId }) {
   };
 
   handle = openDialog({
-    title: "Export labels",
+    title,
     body: [
       group,
       el("label", { class: "row", for: "export-images" }, images, "Include the images in the zip"),

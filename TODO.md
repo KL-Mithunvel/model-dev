@@ -40,7 +40,8 @@
 - [x] Stage 3.1 first slice built 2026-11-13: COCO + YOLO (detect/segment/pose) export and label import with dialogs; not tagged (v0.5 is the planned tag for all of Stage 3).
 - [x] Stage 3.2 built 2026-11-19: CVAT (boxes, polygons) and Label Studio (boxes, polygons, keypoints) export + import, round-trip tests, dialog and scenario; `[U]` lines re-verified (see FORMATS.md).
 - [x] Stage 3 independent review done 2026-11-19: FAIL (1 blocker: an import whose rows were all invalid wiped the image's labels; 3 SHOULD, 4 NIT); fixed with 12 regression tests, 9 of which fail on the old code. No second review pass.
-- [ ] Stage 3.3 (dataset versions): plan proposed, awaiting owner approval; before v0.5: independent review, owner decision on CVAT keypoint (skeleton) support, try the files in a real CVAT / Label Studio; verify the `[U]` lines in `docs/FORMATS.md` and test the exports with an independent loader before tagging v0.5.
+- [x] Stage 3.3 built 2026-11-19 (plan approved by owner): immutable dataset versions, hash, export from a version, dialog, `versions` scenario 9/9, 15 backend tests. Not reviewed independently yet.
+- [ ] Stage 3 / v0.5 still open: before v0.5: independent review, owner decision on CVAT keypoint (skeleton) support, try the files in a real CVAT / Label Studio; verify the `[U]` lines in `docs/FORMATS.md` and test the exports with an independent loader before tagging v0.5.
 - [x] `v0.4` tagged 2026-11-13 on f4e457b (owner approved; review PASS, findings fixed). Tags are local, not pushed.
 - [ ] dev_run: pace default for visible runs was chosen by me (1.0, `--pace 0` for instant) because the owner did not answer; confirm or change.
 - [ ] v0.1 follow-ups (technical debt in CLAUDE.md): parallel import, move browser checks into a real test runner, `httpx2` for the test client (install was blocked), orphan-file sweeper.

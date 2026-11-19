@@ -70,14 +70,37 @@ def export_project(
     dest: Path | None = None,
 ) -> dict[str, Any]:
     """Write the zip to ``dest`` (or only compute the report when ``dest`` is None)."""
+    _check_format(fmt, task)
+    classes = ra.list_classes(conn, project_id)
+    everything = _load(conn, project_id) if classes else []
+    return export_data(config, project_id, classes, everything, fmt, task, include_images, dest)
+
+
+def _check_format(fmt: str, task: str) -> None:
     if fmt not in FORMATS:
         raise ExportError(f"Unknown format '{fmt}'. Use one of {list(FORMATS)}.")
     if fmt == "yolo" and task not in yolo.TASKS:
         raise ExportError(f"Unknown YOLO task '{task}'. Use one of {list(yolo.TASKS)}.")
-    classes = ra.list_classes(conn, project_id)
+
+
+def export_data(
+    config: dict[str, Any],
+    project_id: int,
+    classes: list[dict[str, Any]],
+    everything: list[dict[str, Any]],
+    fmt: str,
+    task: str = "detect",
+    include_images: bool = True,
+    dest: Path | None = None,
+) -> dict[str, Any]:
+    """Export already-loaded ``classes`` and ``everything`` (images with their annotations).
+
+    Used for a live project (``export_project``) and for a frozen dataset version
+    (``versions.export_data``). ``project_id`` only locates the stored image files.
+    """
+    _check_format(fmt, task)
     if not classes:
         raise ExportError("This project has no classes yet, so there is nothing to export.")
-    everything = _load(conn, project_id)
     labelled = [i for i in everything if i["annotations"] or i["marked_empty"]]
     any_split = any(i["split"] for i in labelled)
     included = [i for i in labelled if i["split"] or not any_split]

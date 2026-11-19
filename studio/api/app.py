@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field, StrictInt
 from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from studio import annotations, db, exporter, importer, label_import, paths, repo
+from studio import annotations, db, exporter, importer, label_import, paths, repo, versions
 from studio import repo_annotations as annotations_repo
 from studio.config import load_config
 from studio.jobs import JobManager
@@ -76,6 +76,11 @@ class AnnotationsSave(BaseModel):
     annotations: list[AnnotationItem]
     marked_empty: bool = False
     label_class_id: StrictInt | None = Field(default=None, ge=1, le=MAX_ID)
+
+
+class VersionCreate(BaseModel):
+    name: str = ""
+    preprocessing: dict[str, Any] | None = None
 
 
 class AutoSplitRequest(BaseModel):
@@ -465,6 +470,89 @@ def create_app(
             return label_import.import_labels(conn, config, project_id, source)
         except label_import.LabelImportFailed as error:
             raise HTTPException(400, str(error)) from error
+
+    # ---- dataset versions (immutable snapshots) -----------------------------------------------
+    def need_version(conn: sqlite3.Connection, version_id: ID) -> dict[str, Any]:
+        version = versions.get_version(conn, version_id)
+        if version is None:
+            raise HTTPException(404, f"Version {version_id} not found.")
+        return version
+
+    @app.get("/api/projects/{project_id}/versions")
+    def list_dataset_versions(
+        project_id: ID, conn: sqlite3.Connection = Conn
+    ) -> list[dict[str, Any]]:
+        need_project(conn, project_id)
+        return versions.list_versions(conn, project_id)
+
+    @app.post("/api/projects/{project_id}/versions", status_code=201)
+    def create_dataset_version(
+        project_id: ID, body: VersionCreate, conn: sqlite3.Connection = Conn
+    ) -> Any:
+        need_project(conn, project_id)
+        try:
+            return versions.create_version(
+                conn, project_id, body.name, body.preprocessing, config["versions"]
+            )
+        except versions.VersionExists as error:
+            return JSONResponse({"detail": str(error), "existing": error.number}, status_code=409)
+        except versions.VersionError as error:
+            raise HTTPException(400, str(error)) from error
+
+    @app.get("/api/versions/{version_id}")
+    def get_dataset_version(version_id: ID, conn: sqlite3.Connection = Conn) -> dict[str, Any]:
+        return need_version(conn, version_id)
+
+    @app.delete("/api/versions/{version_id}", status_code=204)
+    def delete_dataset_version(version_id: ID, conn: sqlite3.Connection = Conn) -> Response:
+        if not versions.delete_version(conn, version_id):
+            raise HTTPException(404, f"Version {version_id} not found.")
+        return Response(status_code=204)
+
+    def version_export(
+        conn: sqlite3.Connection, version_id: int, fmt: str, task: str, images: bool,
+        dest: Path | None,
+    ) -> dict[str, Any]:
+        found = versions.export_data(conn, version_id)
+        if found is None:
+            raise HTTPException(404, f"Version {version_id} not found.")
+        project_id, classes, frozen = found
+        try:
+            return exporter.export_data(
+                config, project_id, classes, frozen, fmt, task, images, dest
+            )
+        except exporter.ExportError as error:
+            raise HTTPException(400, str(error)) from error
+
+    @app.get("/api/versions/{version_id}/export/preview")
+    def version_export_preview(
+        version_id: ID, format: str = "coco", task: str = "detect",
+        images: bool = True, conn: sqlite3.Connection = Conn,
+    ) -> dict[str, Any]:
+        return version_export(conn, version_id, format, task, images, None)
+
+    @app.get("/api/versions/{version_id}/export")
+    def version_export_download(
+        version_id: ID, format: str = "coco", task: str = "detect",
+        images: bool = True, conn: sqlite3.Connection = Conn,
+    ) -> FileResponse:
+        version = need_version(conn, version_id)
+        scratch = paths.data_dir(config) / "tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        target = scratch / f"export_{uuid.uuid4().hex[:10]}.zip"
+        try:
+            version_export(conn, version_id, format, task, images, target)
+        except BaseException:
+            target.unlink(missing_ok=True)
+            raise
+        name = (
+            f"project-{version['project_id']}-v{version['number']}-{format}"
+            f"{'-' + task if format == 'yolo' else ''}.zip"
+        )
+        return FileResponse(
+            target, media_type="application/zip", filename=name,
+            background=BackgroundTask(lambda: target.unlink(missing_ok=True)),
+        )
 
     # ---- annotations ------------------------------------------------------------------------
     @app.get("/api/images/{image_id}/annotations")

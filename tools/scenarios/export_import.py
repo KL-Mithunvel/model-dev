@@ -36,7 +36,7 @@ async def run(s):
 
     await s.say("Open the export dialog from the project toolbar")
     await s.goto(f"/#/projects/{project}")
-    await s.wait_for("document.querySelector('.card, .grid, .empty, [data-id]')")
+    await s.wait_for("[...document.querySelectorAll('.btn')].some(b => b.textContent.trim() === 'Export…')")
     await s.click(s.by_text(".btn", "Export…", exact=True))
     await s.wait_for("document.querySelector('dialog[open]') && document.querySelector('dialog .hint[role=status]').innerText.includes('image')")
     summary = await s.js(text_of("dialog .hint[role=status]"))

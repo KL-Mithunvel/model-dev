@@ -55,6 +55,11 @@ annotations:
   palette: ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7",
             "#999999", "#882255", "#44AA99", "#117733", "#AA4499"]
 
+versions:                    # immutable dataset snapshots (Stage 3.3)
+  max_per_project: 200
+  max_name_length: 80
+  max_preprocessing_bytes: 4000  # the recorded preprocessing description, as JSON
+
 splits:
   default_ratios: {train: 0.8, val: 0.1, test: 0.1}
   default_seed: 42

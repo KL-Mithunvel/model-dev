@@ -3,6 +3,7 @@ import { api, watchJob } from "../api.js";
 import { limits } from "../limits.js";
 import { openClassManager } from "../classes.js";
 import { openExportDialog, openLabelImportDialog } from "../labels.js";
+import { openVersionsDialog } from "../versions.js";
 import { el, formatBytes, formatDate, icon, isTyping, openDialog, plural, toast } from "../ui.js";
 
 const SPLITS = ["train", "val", "test"];
@@ -470,6 +471,7 @@ export async function mount(container, { setToolbar, navigate, projectId }) {
 
   // ---- import ----------------------------------------------------------------------------
   function openExport() { openExportDialog({ projectId }); }
+  function openVersions() { openVersionsDialog({ projectId }); }
   function openLabelImport() { openLabelImportDialog({ projectId, onDone: () => loadPage(true) }); }
 
   function openImport() {
@@ -667,6 +669,7 @@ export async function mount(container, { setToolbar, navigate, projectId }) {
       el("button", { class: "btn", type: "button", onclick: openClasses }, "Classes…"),
       el("button", { class: "btn", type: "button", onclick: openImport }, icon("upload"), "Import images"),
       el("button", { class: "btn", type: "button", onclick: openExport }, "Export…"),
+      el("button", { class: "btn", type: "button", onclick: openVersions }, "Versions…"),
       el("button", { class: "btn", type: "button", onclick: openLabelImport }, "Import labels…"),
       el("button", { class: "btn btn-primary", type: "button", onclick: startAnnotating }, icon("box"), "Annotate"),
     ],
@@ -675,7 +678,8 @@ export async function mount(container, { setToolbar, navigate, projectId }) {
       { label: "Manage classes", hint: "", run: openClasses },
       { label: "Import images", hint: "", run: openImport },
       { label: "Export labels (COCO or YOLO zip)", hint: "", run: openExport },
-      { label: "Import labels (COCO or YOLO)", hint: "", run: openLabelImport },
+      { label: "Import labels (COCO, YOLO, CVAT or Label Studio)", hint: "", run: openLabelImport },
+      { label: "Dataset versions (freeze the labelled images)", hint: "", run: openVersions },
       { label: "Split images into train / val / test", hint: "", run: openAutoSplit },
       { label: "Select all loaded images", hint: "Ctrl A", run: selectAllLoaded },
       { label: "Clear filters", hint: "", run: clearFilters },

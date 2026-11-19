@@ -124,7 +124,7 @@ Goal: a fast, forgiving annotator.
 Goal: no lock-in; reproducible datasets.
 - **3.1 COCO + YOLO** import/export for all four task types.
 - **3.2 Adapters** — CVAT and Label Studio import/export.
-- **3.3 Dataset versions** — Immutable snapshots (frozen image list, labels, split, preprocessing) with a manifest and hash.
+- **3.3 Dataset versions** — Immutable snapshots (frozen image list, labels, split, preprocessing) with a manifest and hash. **Built 2026-11-19** (owner approved the plan: per-project numbered versions with optional name, deletion allowed): `studio/versions.py`, migration 003, API, gallery dialog, `versions` scenario. Preprocessing is recorded and hashed but not applied until training needs it (Stage 6).
   Success: round-trip tests (export → import → identical annotations) for every format and task type; snapshot hash is stable.
 
 ### Stage 4 — AI-assist (v0.6)
